@@ -114,17 +114,22 @@ public partial class Node {
         string ip; int port; byte[] key;
         lock (L) {
             Peer p = Find(peerId);
-            if (p == null) throw new InvalidOperationException("没有这台电脑");
-            if (!p.Online) throw new InvalidOperationException(p.Name + " 不在线");
+            if (p == null) throw Lang.Err("没有这台电脑", "no such PC");
+            if (!p.Online) throw Lang.Err("{0} 不在线", "{0} is offline", p.Name);
             ip = p.Ip; port = p.Port; key = master;
         }
         Channel ch = Channel.Connect(ip, port, key);
         try {
             ch.SendJson(new { t = type, id = Util.NewId(), from = Cfg.Id, name = Cfg.Name, port = Cfg.Port, to = peerId });
             reply = ch.ReceiveJson();
-            if (!Util.Flag(reply, "ok")) throw new InvalidOperationException(Util.Str(reply, "err") == "版本不一致" ? "对方的 LanTalk 版本太旧，请先更新那台电脑上的 LanTalk" : Util.Str(reply, "err"));
+            if (!Util.Flag(reply, "ok")) throw Refusal(reply);
             return ch;
         } catch { ch.Dispose(); throw; }
+    }
+    static LtException Refusal(Dictionary<string, object> r) {
+        Msg m = Msg.Wire(r, "err");
+        if (m != null && m.Zh == OldVersion.Zh) m = Lang.M("对方的 LanTalk 版本太旧，请先更新那台电脑上的 LanTalk", "LanTalk on the other PC is too old, update it first");
+        return new LtException(m ?? Lang.M("对方拒绝了", "the other PC refused"));
     }
     public string FetchKey(string peerId) {
         Dictionary<string, object> r;
@@ -137,15 +142,15 @@ public partial class Node {
         b["agent"] = agent;
         FileStream src = null;
         ChatMsg m = null;
-        string end = "中断";
+        Msg end = Lang.M("中断", "interrupted");
         try {
-            if (op == "run") { if (Util.Str(b, "cmd").Trim().Length == 0) throw new InvalidOperationException("命令是空的"); if (Util.Str(b, "cmd").Length > MaxCommand) throw new InvalidOperationException("命令太长，请先用 lt put 传脚本过去再运行"); }
+            if (op == "run") { if (Util.Str(b, "cmd").Trim().Length == 0) throw Lang.Err("命令是空的", "the command is empty"); if (Util.Str(b, "cmd").Length > MaxCommand) throw Lang.Err("命令太长，请先用 lt put 传脚本过去再运行", "the command is too long: copy a script over with lt put and run that"); }
             if (op == "put") {
-                if (!File.Exists(local)) throw new InvalidOperationException("找不到文件：" + local + "（文件夹请先打包，或用 lt file）");
+                if (!File.Exists(local)) throw Lang.Err("找不到文件：{0}（文件夹请先打包，或用 lt file）", "file not found: {0} (zip folders first, or use lt file)", local);
                 src = new FileStream(local, FileMode.Open, FileAccess.Read, FileShare.Read);
                 b["size"] = src.Length; b["sha"] = Sha(src); src.Position = 0;
             }
-            if (op == "get" && File.Exists(local) && !Util.Flag(b, "force")) throw new InvalidOperationException("本机已有这个文件：" + local + "（要覆盖请加 --force）");
+            if (op == "get" && File.Exists(local) && !Util.Flag(b, "force")) throw Lang.Err("本机已有这个文件：{0}（要覆盖请加 --force）", "this PC already has that file: {0} (--force overwrites it)", local);
             Dictionary<string, object> r;
             using (Channel ch = Dial(peerId, "control", out r)) {
                 string body = Util.ToJson(b), nonce = Util.Str(r, "nonce");
@@ -158,24 +163,24 @@ public partial class Node {
                     while (true) {
                         Dictionary<string, object> f = ch.ReceiveJson();
                         string k = Util.Str(f, "k");
-                        if (k == "") throw new InvalidOperationException(Util.Str(f, "err")); // plain refusal
+                        if (k == "") throw Refusal(f);
                         if (k == "go") { byte[] buf = new byte[Chunk]; int n; while ((n = src.Read(buf, 0, buf.Length)) > 0) { ch.Send(buf, n); emit(new { ok = true, k = "p" }); } }
-                        else if (k == "data") { GetBody(ch, local, Util.Num(f, "size"), Util.Str(f, "sha"), Util.Flag(b, "force"), emit); end = "已取回 · " + Util.SizeText(Util.Num(f, "size")); emit(new { ok = true, k = "x", code = 0, done = true }); return; }
+                        else if (k == "data") { GetBody(ch, local, Util.Num(f, "size"), Util.Str(f, "sha"), Util.Flag(b, "force"), emit); end = Lang.M("已取回 · {0}", "fetched · {0}", Util.SizeText(Util.Num(f, "size"))); emit(new { ok = true, k = "x", code = 0, done = true }); return; }
                         else if (k == "x") {
-                            string err = Util.Str(f, "err"); end = Util.Str(f, "end");
-                            if (err != "") throw new InvalidOperationException(err);
+                            Msg err = Msg.Wire(f, "err"); end = Msg.Wire(f, "end") ?? end;
+                            if (err != null) throw new LtException(err);
                             emit(new { ok = true, k = "x", code = Util.Num(f, "code"), done = true });
                             return;
                         } else { f["ok"] = true; emit(f); }
                     }
                 } catch (Exception e) {
-                    if (s.Stopped) { end = "已停止"; throw new InvalidOperationException("已在本机停止"); }
-                    if (e is EndOfStreamException || e.InnerException is System.Net.Sockets.SocketException) throw new InvalidOperationException("和对方的连接断了，命令可能没有执行完");
+                    if (s.Stopped) { end = Stopped; throw Lang.Err("已在本机停止", "stopped on this PC"); }
+                    if (e is EndOfStreamException || e.InnerException is System.Net.Sockets.SocketException) throw Lang.Err("和对方的连接断了，命令可能没有执行完", "lost the connection, the command may not have finished");
                     throw;
                 } finally { s.StopPing(); }
             }
-        } catch (CryptographicException) { throw new InvalidOperationException("配对码不一致"); }
-        catch (System.Net.Sockets.SocketException e) { throw new InvalidOperationException("连不上对方：" + e.Message); }
+        } catch (CryptographicException) { throw Lang.Err("配对码不一致", "the pairing codes differ"); }
+        catch (System.Net.Sockets.SocketException e) { throw Lang.Err("连不上对方：{0}", "can't reach the other PC: {0}", e.Message); }
         catch (UnauthorizedAccessException e) { throw new InvalidOperationException(e.Message); }
         catch (IOException e) { throw new InvalidOperationException(e.Message); }
         finally { if (src != null) src.Dispose(); if (m != null) Finish(m, end); }
@@ -188,34 +193,38 @@ public partial class Node {
     // ---- being asked ----
     void ServeControl(Channel ch, string from) {
         Grant g = GrantFor(from);
-        if (g == null) { Reply(ch, false, "对方还没有允许本机控制它。要由人在那台电脑上打开 LanTalk，选中本机，点“控制权限”"); return; }
+        if (g == null) { Reply(ch, false, Lang.M("对方还没有允许本机控制它。要由人在那台电脑上打开 LanTalk，选中本机，点“控制权限”", "the other PC doesn't let this PC control it. Someone there has to open LanTalk, pick this PC and click \"Control access\"")); return; }
         string nonce = Convert.ToBase64String(Crypto.Random(32));
         ch.SendJson(new { ok = true, nonce = nonce });
         Dictionary<string, object> r = ch.ReceiveJson();
         string body = Util.Str(r, "body");
-        if (!Verify(g.Key, Signed(Cfg.Id, from, nonce, body), Util.Str(r, "sig"))) { Reply(ch, false, "身份核对失败：本机的身份和那台电脑上授权的不一致。重装过的话，请在那台电脑上重新设置“控制权限”"); return; }
+        if (!Verify(g.Key, Signed(Cfg.Id, from, nonce, body), Util.Str(r, "sig"))) { Reply(ch, false, Lang.M("身份核对失败：本机的身份和那台电脑上授权的不一致。重装过的话，请在那台电脑上重新设置“控制权限”", "identity check failed: this isn't the identity that was allowed there. After a reinstall, set \"Control access\" again on that PC")); return; }
         Dictionary<string, object> b = Util.FromJson<Dictionary<string, object>>(body);
         string op = Util.Str(b, "op");
-        if (op != "run" && op != "put" && op != "get") { Reply(ch, false, "版本不一致"); return; }
-        if (Util.Str(b, "cmd").Length > MaxCommand) { Reply(ch, false, "命令太长"); return; }
+        if (op != "run" && op != "put" && op != "get") { Reply(ch, false, OldVersion); return; }
+        if (Util.Str(b, "cmd").Length > MaxCommand) { Reply(ch, false, Lang.M("命令太长", "the command is too long")); return; }
         ControlSession s = new ControlSession(ch, false);
-        lock (L) if (sessions.Count >= MaxControls) { Reply(ch, false, "对方同时运行的命令太多"); return; }
+        lock (L) if (sessions.Count >= MaxControls) { Reply(ch, false, Lang.M("对方同时运行的命令太多", "too many commands are running there")); return; }
         ch.Timeout = 30000;
         Peer peer = Find(from);
-        string name = peer == null ? g.Name : peer.Name, agent = Util.Cut(Util.Str(b, "agent"), 20), end = "中断";
+        string name = peer == null ? g.Name : peer.Name, agent = Util.Cut(Util.Str(b, "agent"), 20);
+        Msg end = Lang.M("中断", "interrupted");
         ChatMsg m = Record(from, from, name, agent, Describe(b, null), s);
         try {
             s.StartPing();
             if (op == "run") Run(delegate { // notices "the other side hung up"
                 try { while (true) ch.ReceiveJson(); } catch (Exception) { s.Stopped = true; }
             });
-            if (!Allowed(g, name, agent, m.Text, s)) { end = s.Stopped ? "已取消" : "已拒绝"; s.Last(new { k = "x", err = "那台电脑上的人没有同意", end = end }); return; }
+            if (!Allowed(g, name, agent, m.Text, s)) { end = s.Stopped ? Lang.M("已取消", "cancelled") : Lang.M("已拒绝", "declined"); s.Last(Done(Lang.M("那台电脑上的人没有同意", "the person at that PC didn't approve it"), end, 0)); return; }
             if (op == "run") end = DoRun(s, b); else if (op == "put") end = DoPut(s, ch, b); else end = DoGet(s, ch, b);
         } catch (Exception e) {
-            end = s.Stopped ? "已停止" : "失败：" + e.Message;
-            try { s.Last(new { k = "x", err = e.Message, end = end }); } catch (Exception) { }
+            Msg why = Msg.Of(e);
+            end = s.Stopped ? Stopped : new Msg("失败：" + why.Zh, "failed: " + why.En);
+            try { s.Last(Done(why, end, 0)); } catch (Exception) { }
         } finally { s.StopPing(); Finish(m, end); }
     }
+    static readonly Msg Stopped = Lang.M("已停止", "stopped");
+    static object Done(Msg err, Msg end, int code) { return new { k = "x", code = code, err = err == null ? "" : err.Zh, err_en = err == null ? "" : err.En, end = end.Zh, end_en = end.En }; }
     bool Allowed(Grant g, string name, string agent, string text, ControlSession s) {
         lock (L) {
             DateTime until;
@@ -242,8 +251,8 @@ public partial class Node {
     static string Describe(Dictionary<string, object> b, string local) {
         string op = Util.Str(b, "op"), cwd = Util.Str(b, "cwd");
         if (op == "run") return (cwd != "" ? "[" + cwd + "]\n" : "") + Util.Str(b, "cmd");
-        if (op == "put") return "写入文件 " + Util.Str(b, "path") + "（" + Util.SizeText(Util.Num(b, "size")) + (Util.Flag(b, "force") ? "，覆盖已有" : "") + "）" + (local != null ? "\n来自 " + local : "");
-        return "读取文件 " + Util.Str(b, "path") + (local != null ? "\n存到 " + local : "");
+        if (op == "put") return Lang.T("写入文件 {0}（{1}{2}）", "Write file {0} ({1}{2})", Util.Str(b, "path"), Util.SizeText(Util.Num(b, "size")), Util.Flag(b, "force") ? Lang.T("，覆盖已有", ", overwriting") : "") + (local != null ? "\n" + Lang.T("来自 {0}", "from {0}", local) : "");
+        return Lang.T("读取文件 {0}", "Read file {0}", Util.Str(b, "path")) + (local != null ? "\n" + Lang.T("存到 {0}", "into {0}", local) : "");
     }
     ChatMsg Record(string conv, string from, string fromName, string agent, string text, ControlSession s) {
         ChatMsg m = new ChatMsg();
@@ -252,16 +261,16 @@ public partial class Node {
         Add(m);
         return m;
     }
-    void Finish(ChatMsg m, string end) {
-        lock (L) { sessions.Remove(m.Id); m.State = "ok"; m.Error = end; }
+    void Finish(ChatMsg m, Msg end) {
+        lock (L) { sessions.Remove(m.Id); m.State = "ok"; m.Err(end); }
         Changed(m, true);
     }
 
-    string DoRun(ControlSession s, Dictionary<string, object> b) {
+    Msg DoRun(ControlSession s, Dictionary<string, object> b) {
         string cwd = Util.Str(b, "cwd");
         int timeout = (int)Math.Max(1, Math.Min(86400, Util.Num(b, "timeout")));
         if (cwd == "") cwd = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        if (!Directory.Exists(cwd)) throw new InvalidOperationException("没有这个文件夹：" + cwd);
+        if (!Directory.Exists(cwd)) throw Lang.Err("没有这个文件夹：{0}", "no such folder: {0}", cwd);
         string script = "[Console]::OutputEncoding = New-Object Text.UTF8Encoding $false; $OutputEncoding = [Console]::OutputEncoding; $ProgressPreference = 'SilentlyContinue'\n"
             + Util.Str(b, "cmd") + "\nif (-not $?) { if ($LASTEXITCODE) { exit $LASTEXITCODE } else { exit 1 } }";
         ProcessStartInfo si = new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "WindowsPowerShell\\v1.0\\powershell.exe"),
@@ -277,18 +286,18 @@ public partial class Node {
             job.Add(p);
             p.StandardInput.Close();
             Thread[] readers = new Thread[] { Reader(p.StandardOutput, "o", s, delegate (int n) { return Interlocked.Add(ref left, -n) >= 0; }), Reader(p.StandardError, "e", s, delegate (int n) { return Interlocked.Add(ref left, -n) >= 0; }) };
-            string why = null;
+            Msg why = null;
             while (!p.WaitForExit(100)) {
-                if (s.Stopped || stopping) why = "已停止"; else if (sw.Elapsed.TotalSeconds > timeout) why = "超时（" + timeout + " 秒）"; else continue;
+                if (s.Stopped || stopping) why = Stopped; else if (sw.Elapsed.TotalSeconds > timeout) why = Lang.M("超时（{0} 秒）", "timed out ({0} s)", timeout); else continue;
                 job.Kill();
                 p.WaitForExit(5000);
                 break;
             }
             foreach (Thread t in readers) t.Join(1500); // a program left running may keep the pipe open
-            string time = sw.Elapsed.TotalSeconds.ToString("0.0") + " 秒", end = why != null ? why : "退出码 " + p.ExitCode + " · " + time;
-            if (left < 0) s.SendSafe(new { k = "e", d = "\n（输出太长，后面的已省略；可先写到文件，再用 lt get 取回）\n" });
-            if (why == "已停止") s.Last(new { k = "x", err = "命令在那台电脑上被停止", end = end });
-            else s.Last(new { k = "x", code = why != null ? 124 : p.ExitCode, end = end });
+            Msg end = why ?? Lang.M("退出码 {0} · {1:0.0} 秒", "exit code {0} · {1:0.0} s", p.ExitCode, sw.Elapsed.TotalSeconds);
+            if (left < 0) s.SendSafe(new { k = "e", d = "\n（输出太长，后面的已省略；可先写到文件，再用 lt get 取回）\n", d_en = "\n(Output too long, the rest was dropped. Write it to a file and fetch that with lt get.)\n" });
+            if (why == Stopped) s.Last(Done(Lang.M("命令在那台电脑上被停止", "the command was stopped on that PC"), end, 0));
+            else s.Last(Done(null, end, why != null ? 124 : p.ExitCode));
             return end;
         }
     }
@@ -309,31 +318,31 @@ public partial class Node {
     }
     static string RemotePath(Dictionary<string, object> b) {
         string p = Util.Str(b, "path");
-        if (p.Length < 4 || !(p[1] == ':' && (p[2] == '\\' || p[2] == '/')) && !p.StartsWith("\\\\")) throw new InvalidOperationException("远程路径要写完整，例如 D:\\项目\\a.txt");
+        if (p.Length < 4 || !(p[1] == ':' && (p[2] == '\\' || p[2] == '/')) && !p.StartsWith("\\\\")) throw Lang.Err("远程路径要写完整，例如 D:\\项目\\a.txt", "the remote path must be complete, like D:\\project\\a.txt");
         return Path.GetFullPath(p);
     }
-    string DoPut(ControlSession s, Channel ch, Dictionary<string, object> b) {
+    Msg DoPut(ControlSession s, Channel ch, Dictionary<string, object> b) {
         string path = RemotePath(b); long size = Util.Num(b, "size");
-        if (Directory.Exists(path)) throw new InvalidOperationException("那里是一个文件夹：" + path);
-        if (File.Exists(path) && !Util.Flag(b, "force")) throw new InvalidOperationException("那台电脑上已有这个文件：" + path + "（要覆盖请加 --force）");
+        if (Directory.Exists(path)) throw Lang.Err("那里是一个文件夹：{0}", "that is a folder: {0}", path);
+        if (File.Exists(path) && !Util.Flag(b, "force")) throw Lang.Err("那台电脑上已有这个文件：{0}（要覆盖请加 --force）", "that PC already has this file: {0} (--force overwrites it)", path);
         Directory.CreateDirectory(Path.GetDirectoryName(path));
         s.StopPing();
         s.Send(new { k = "go" });
-        ReceiveTo(path, Util.Flag(b, "force"), size, Util.Str(b, "sha"), delegate { if (s.Stopped || stopping) throw new InvalidOperationException("已停止"); return ch.Receive(); });
-        string end = "已写入 · " + Util.SizeText(size);
-        s.Last(new { k = "x", code = 0, end = end });
+        ReceiveTo(path, Util.Flag(b, "force"), size, Util.Str(b, "sha"), delegate { if (s.Stopped || stopping) throw new LtException(Stopped); return ch.Receive(); });
+        Msg end = Lang.M("已写入 · {0}", "written · {0}", Util.SizeText(size));
+        s.Last(Done(null, end, 0));
         return end;
     }
-    string DoGet(ControlSession s, Channel ch, Dictionary<string, object> b) {
+    Msg DoGet(ControlSession s, Channel ch, Dictionary<string, object> b) {
         string path = RemotePath(b);
-        if (!File.Exists(path)) throw new InvalidOperationException("那台电脑上没有这个文件：" + path);
+        if (!File.Exists(path)) throw Lang.Err("那台电脑上没有这个文件：{0}", "no such file on that PC: {0}", path);
         using (FileStream f = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read)) {
             long left = f.Length;
             string sha = Sha(f); f.Position = 0;
             s.Last(new { k = "data", size = left, sha = sha });
             byte[] buf = new byte[Chunk]; int n;
-            while (left > 0 && (n = f.Read(buf, 0, (int)Math.Min(buf.Length, left))) > 0) { if (s.Stopped || stopping) throw new InvalidOperationException("已停止"); ch.Send(buf, n); left -= n; }
-            return "已读取 · " + Util.SizeText(f.Length);
+            while (left > 0 && (n = f.Read(buf, 0, (int)Math.Min(buf.Length, left))) > 0) { if (s.Stopped || stopping) throw new LtException(Stopped); ch.Send(buf, n); left -= n; }
+            return Lang.M("已读取 · {0}", "read · {0}", Util.SizeText(f.Length));
         }
     }
     static string Sha(Stream s) { using (SHA256 h = SHA256.Create()) return Convert.ToBase64String(h.ComputeHash(s)); }
@@ -343,11 +352,11 @@ public partial class Node {
             using (FileStream f = new FileStream(tmp, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None, 65536)) {
                 for (long left = size; left > 0; ) {
                     byte[] d = next();
-                    if (d.Length == 0 || d.Length > left) throw new IOException("数据长度错误");
+                    if (d.Length == 0 || d.Length > left) throw Lang.Err("数据长度错误", "wrong data length");
                     f.Write(d, 0, d.Length); left -= d.Length;
                 }
                 f.Position = 0;
-                if (Sha(f) != sha) throw new IOException("文件校验不一致");
+                if (Sha(f) != sha) throw Lang.Err("文件校验不一致", "the file arrived damaged");
             }
             if (force && File.Exists(path)) File.Replace(tmp, path, null); else File.Move(tmp, path); // Move refuses to overwrite
         } finally { if (File.Exists(tmp)) File.Delete(tmp); }

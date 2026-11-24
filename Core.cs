@@ -25,16 +25,18 @@ public class Peer {
 }
 
 public class ChatMsg {
-    public string Id, Conv, From, FromName, Agent, Kind, Text, Path, State, Error; // Kind: text|file|run  State: queued|sending|ok|recv|fail|cancel, run while a remote command runs
+    public string Id, Conv, From, FromName, Agent, Kind, Text, Path, State, Error, ErrorEn; // Kind: text|file|run  State: queued|sending|ok|recv|fail|cancel, run while a remote command runs
     public long Time, Size, Seq;   // Seq: local arrival order, the CLI inbox cursor
     public List<string> Pending = new List<string>();  // peers that don't have it yet (own messages only)
+    public void Err(Msg m) { Error = m == null ? null : m.Zh; ErrorEn = m == null ? null : m.En; }
+    [ScriptIgnore] public string ErrText { get { return new Msg(Error ?? "", string.IsNullOrEmpty(ErrorEn) ? Error ?? "" : ErrorEn); } }
     [ScriptIgnore] public long Done;
     [ScriptIgnore] public volatile bool Cancelled;
     [ScriptIgnore] public DateTime LocalTime { get { return new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc).AddMilliseconds(Time).ToLocalTime(); } }
 }
 
 public class Settings {
-    public string Id, Name, CodeProtected, KeyProtected, SaveDir;
+    public string Id, Name, CodeProtected, KeyProtected, SaveDir, Lang; // Lang: zh | en | auto
     public int Port;
     public List<string> Manual = new List<string>();  // "ip" or "ip:port"
     public List<Peer> Peers = new List<Peer>();
@@ -150,7 +152,7 @@ public class Channel : IDisposable {
         TcpClient c = new TcpClient(AddressFamily.InterNetwork);
         try {
             IAsyncResult r = c.BeginConnect(IPAddress.Parse(ip), port, null, null);
-            if (!r.AsyncWaitHandle.WaitOne(4000)) throw new IOException("连接超时");
+            if (!r.AsyncWaitHandle.WaitOne(4000)) throw new IOException(Lang.T("连接超时", "the connection timed out"));
             c.EndConnect(r);
             Channel ch = new Channel(c);
             byte[] mine = Crypto.Random(32);
@@ -179,7 +181,7 @@ public class Channel : IDisposable {
     byte[] ReadExact(int n) {
         byte[] b = new byte[n];
         int got = 0;
-        while (got < n) { int r = ns.Read(b, got, n - got); if (r <= 0) throw new EndOfStreamException("连接已断开"); got += r; }
+        while (got < n) { int r = ns.Read(b, got, n - got); if (r <= 0) throw new EndOfStreamException(Lang.T("连接已断开", "the connection was closed")); got += r; }
         return b;
     }
     public void Send(byte[] data, int count) {
@@ -196,7 +198,7 @@ public class Channel : IDisposable {
         if (len < 64 || len > MaxFrame) throw new IOException("bad frame");
         byte[] f = ReadExact(len), iv = new byte[16], ct = new byte[len - 48], mac = new byte[32];
         Buffer.BlockCopy(f, 0, iv, 0, 16); Buffer.BlockCopy(f, 16, ct, 0, ct.Length); Buffer.BlockCopy(f, len - 32, mac, 0, 32);
-        if (!Crypto.Same(mac, Crypto.Hmac(recvMac, BitConverter.GetBytes(recvSeq++), iv, ct))) throw new CryptographicException("配对码不一致");
+        if (!Crypto.Same(mac, Crypto.Hmac(recvMac, BitConverter.GetBytes(recvSeq++), iv, ct))) throw new CryptographicException(Lang.T("配对码不一致", "the pairing codes differ"));
         using (ICryptoTransform t = aesIn.CreateDecryptor(recvEnc, iv)) return t.TransformFinalBlock(ct, 0, ct.Length);
     }
     public void SendJson(object o) { byte[] b = Encoding.UTF8.GetBytes(Util.ToJson(o)); Send(b, b.Length); }
@@ -205,7 +207,11 @@ public class Channel : IDisposable {
 }
 
 // The receiver said no (disk full, ...) or the source is unreadable: retrying won't help.
-public class PermanentException : Exception { public PermanentException(string m) : base(m) { } }
+public class PermanentException : Exception {
+    public readonly Msg M;
+    public PermanentException(Msg m) { M = m; }
+    public override string Message { get { return M; } }
+}
 
 public partial class Node : IDisposable {
     public const int DefaultPort = 47820, MaxText = 100000, MaxFiles = 20000;
@@ -234,7 +240,9 @@ public partial class Node : IDisposable {
         dir = dataDir; bind = bindTo;
         Directory.CreateDirectory(dir);
         string f = Path.Combine(dir, "config.json");
-        Cfg = File.Exists(f) ? Util.FromJson<Settings>(File.ReadAllText(f, Encoding.UTF8)) : new Settings();
+        bool known = File.Exists(f);
+        Cfg = known ? Util.FromJson<Settings>(File.ReadAllText(f, Encoding.UTF8)) : new Settings();
+        if (string.IsNullOrEmpty(Cfg.Lang)) Cfg.Lang = known ? "zh" : "auto"; // set up before there was a choice: it was Chinese
         if (!Util.IsId(Cfg.Id)) Cfg.Id = Util.NewId();
         if (string.IsNullOrEmpty(Cfg.Name)) Cfg.Name = Environment.MachineName;
         if (Cfg.Port <= 0) Cfg.Port = DefaultPort;
@@ -417,8 +425,8 @@ public partial class Node : IDisposable {
                 List<ChatMsg> list = order.Select(delegate (string id) { return map[id]; }).ToList();
                 foreach (ChatMsg m in list) {
                     if (m.State == "sending") m.State = "queued";
-                    if (m.State == "run") { m.State = "ok"; m.Error = "中断"; }
-                    if (m.State == "recv") { m.State = "fail"; m.Error = "传输中断"; }
+                    if (m.State == "run") { m.State = "ok"; m.Err(Lang.M("中断", "interrupted")); }
+                    if (m.State == "recv") { m.State = "fail"; m.Err(Lang.M("传输中断", "transfer interrupted")); }
                 }
                 history[conv] = list;
                 foreach (ChatMsg m in list) lastSeq = Math.Max(lastSeq, m.Seq);
@@ -467,17 +475,17 @@ public partial class Node : IDisposable {
 
     // ---- sending ----
     ChatMsg NewOwn(string conv, string kind, string text, string agent) {
-        if (!IsGroup(conv) && Find(conv) == null) throw new InvalidOperationException("没有这台电脑");
+        if (!IsGroup(conv) && Find(conv) == null) throw Lang.Err("没有这台电脑", "no such PC");
         ChatMsg m = new ChatMsg();
         m.Id = Util.NewId(); m.Conv = conv; m.From = Cfg.Id; m.FromName = Cfg.Name; m.Agent = agent ?? ""; m.Kind = kind; m.Text = text; m.Time = Util.Now(); m.State = "queued";
         lock (L) m.Pending = IsGroup(conv) ? Cfg.Peers.Select(delegate (Peer p) { return p.Id; }).ToList() : new List<string> { conv };
-        if (m.Pending.Count == 0) throw new InvalidOperationException("还没有发现其他电脑");
+        if (m.Pending.Count == 0) throw Lang.Err("还没有发现其他电脑", "no other PC has been found yet");
         return m;
     }
     public ChatMsg SendText(string conv, string text) { return SendText(conv, text, null); }
     public ChatMsg SendText(string conv, string text, string agent) {
-        if (text.Trim().Length == 0) throw new InvalidOperationException("消息是空的");
-        if (text.Length > MaxText) throw new InvalidOperationException("文字太长，请存成文件再发");
+        if (text.Trim().Length == 0) throw Lang.Err("消息是空的", "the message is empty");
+        if (text.Length > MaxText) throw Lang.Err("文字太长，请存成文件再发", "the text is too long, send it as a file");
         ChatMsg m = NewOwn(conv, "text", text, agent);
         Add(m); pumpSignal.Set();
         return m;
@@ -486,8 +494,8 @@ public partial class Node : IDisposable {
     public ChatMsg SendPath(string conv, string path, string agent) {
         path = Path.GetFullPath(path);
         if (path.Length > 3) path = path.TrimEnd('\\');
-        if (Path.GetFileName(path).Length == 0) throw new InvalidOperationException("不能直接发送整个磁盘");
-        if (!File.Exists(path) && !Directory.Exists(path)) throw new InvalidOperationException("找不到：" + path);
+        if (Path.GetFileName(path).Length == 0) throw Lang.Err("不能直接发送整个磁盘", "can't send a whole drive");
+        if (!File.Exists(path) && !Directory.Exists(path)) throw Lang.Err("找不到：{0}", "not found: {0}", path);
         ChatMsg m = NewOwn(conv, "file", Path.GetFileName(path), agent);
         m.Path = path;
         if (File.Exists(path)) m.Size = new FileInfo(path).Length;
@@ -504,7 +512,7 @@ public partial class Node : IDisposable {
     public void Retry(ChatMsg m) {
         lock (L) {
             if (m.From != Cfg.Id || m.State != "fail" && m.State != "cancel") return;
-            m.Cancelled = false; m.Error = null; m.State = "queued"; m.Done = 0;
+            m.Cancelled = false; m.Err(null); m.State = "queued"; m.Done = 0;
             m.Pending = IsGroup(m.Conv) ? Cfg.Peers.Select(delegate (Peer p) { return p.Id; }).ToList() : new List<string> { m.Conv };
             Append(m);
         }
@@ -541,19 +549,19 @@ public partial class Node : IDisposable {
             ChatMsg m; string ip; int port; byte[] key;
             lock (L) { m = NextFor(p.Id, kind); ip = p.Ip; port = p.Port; key = master; if (m != null) m.State = "sending"; }
             if (m == null) return;
-            string error = null; bool permanent = false;
+            Msg error = null; bool permanent = false;
             try {
                 Changed(m, false);
                 using (Channel ch = Channel.Connect(ip, port, key)) {
                     if (kind == "text") SendTextTo(ch, p, m); else SendFileTo(ch, p, m);
                 }
-            } catch (PermanentException e) { error = e.Message; permanent = true; }
-            catch (Exception e) { error = e.Message; }
+            } catch (PermanentException e) { error = e.M; permanent = true; }
+            catch (Exception e) { error = Msg.Of(e); }
             lock (L) {
                 if (m.Cancelled) { m.State = "cancel"; m.Pending.Clear(); }
                 else if (error == null || permanent) {
                     m.Pending.Remove(p.Id);
-                    if (permanent) m.Error = p.Name + "：" + error;
+                    if (permanent) m.Err(new Msg(p.Name + "：" + error.Zh, p.Name + ": " + error.En));
                     m.State = m.Pending.Count > 0 ? "queued" : (m.Error != null ? "fail" : "ok");
                 } else { m.State = "queued"; m.Done = 0; p.RetryAfter = DateTime.UtcNow.AddSeconds(5); } // try again later
                 if (error == null && !m.Cancelled) p.LastSeen = DateTime.UtcNow;
@@ -570,7 +578,7 @@ public partial class Node : IDisposable {
         return d;
     }
     static void Expect(Dictionary<string, object> r) {
-        if (!Util.Flag(r, "ok")) throw new PermanentException(Util.Str(r, "err"));
+        if (!Util.Flag(r, "ok")) throw new PermanentException(Msg.Wire(r, "err") ?? Lang.M("对方拒绝接收", "the other PC refused it"));
     }
     void SendTextTo(Channel ch, Peer p, ChatMsg m) { ch.SendJson(Header("text", p, m)); Expect(ch.ReceiveJson()); }
 
@@ -581,9 +589,9 @@ public partial class Node : IDisposable {
         try {
             if (File.Exists(m.Path)) AddFile(m.Path, m.Text, full, files, ref total);
             else if (Directory.Exists(m.Path)) Walk(m.Path, m.Text, full, files, ref total);
-            else throw new PermanentException("原文件已不存在");
-        } catch (IOException e) { throw new PermanentException(e.Message); }
-        catch (UnauthorizedAccessException e) { throw new PermanentException(e.Message); }
+            else throw new PermanentException(Lang.M("原文件已不存在", "the original file is gone"));
+        } catch (IOException e) { throw new PermanentException(Msg.Of(e)); }
+        catch (UnauthorizedAccessException e) { throw new PermanentException(Msg.Of(e)); }
         Dictionary<string, object> h = Header("file", p, m);
         h["total"] = total; h["files"] = files; h["folder"] = Directory.Exists(m.Path);
         m.Size = total; m.Done = 0;
@@ -598,12 +606,12 @@ public partial class Node : IDisposable {
             long left = Convert.ToInt64(files[i]["s"]);
             FileStream fs;
             try { fs = new FileStream(full[i], FileMode.Open, FileAccess.Read, FileShare.ReadWrite, 4096, FileOptions.SequentialScan); }
-            catch (Exception e) { throw new PermanentException(e.Message); }
+            catch (Exception e) { throw new PermanentException(Msg.Of(e)); }
             using (fs) {
                 while (left > 0) {
-                    if (m.Cancelled || stopping) throw new IOException("已取消");
+                    if (m.Cancelled || stopping) throw new IOException(Lang.T("已取消", "cancelled"));
                     int n = fs.Read(buf, 0, (int)Math.Min(buf.Length, left));
-                    if (n <= 0) throw new PermanentException("发送过程中文件被修改");
+                    if (n <= 0) throw new PermanentException(Lang.M("发送过程中文件被修改", "the file changed while it was being sent"));
                     ch.Send(buf, n);
                     left -= n; m.Done += n;
                     if ((DateTime.UtcNow - tick).TotalMilliseconds > 150) { tick = DateTime.UtcNow; Changed(m, false); }
@@ -613,7 +621,7 @@ public partial class Node : IDisposable {
         Expect(ch.ReceiveJson());
     }
     static void AddFile(string path, string rel, List<string> full, List<Dictionary<string, object>> files, ref long total) {
-        if (full.Count >= MaxFiles) throw new PermanentException("文件太多（超过 " + MaxFiles + " 个），请先打包成 zip");
+        if (full.Count >= MaxFiles) throw new PermanentException(Lang.M("文件太多（超过 {0} 个），请先打包成 zip", "too many files (over {0}), zip them first", MaxFiles));
         long s = new FileInfo(path).Length;
         Dictionary<string, object> d = new Dictionary<string, object>(); d["p"] = rel; d["s"] = s;
         full.Add(path); files.Add(d); total += s;
@@ -640,12 +648,13 @@ public partial class Node : IDisposable {
             });
         }
     }
-    static void Reply(Channel ch, bool ok, string err) { ch.SendJson(new { ok = ok, err = err ?? "" }); }
+    static void Reply(Channel ch, bool ok, Msg err) { ch.SendJson(new { ok = ok, err = err == null ? "" : err.Zh, err_en = err == null ? "" : err.En }); }
+    static readonly Msg OldVersion = Lang.M("版本不一致", "version mismatch"), BadList = Lang.M("文件列表无效", "invalid file list"); // the first one is also what older versions send
 
     void Serve(Channel ch) {
         Dictionary<string, object> h = ch.ReceiveJson(); // authenticated from here on
         string from = Util.Str(h, "from"), id = Util.Str(h, "id"), type = Util.Str(h, "t");
-        if (Util.Str(h, "to") != Cfg.Id) { Reply(ch, false, "这条消息不是发给本机的"); return; }
+        if (Util.Str(h, "to") != Cfg.Id) { Reply(ch, false, Lang.M("这条消息不是发给本机的", "this message is for another PC")); return; }
         if (!Util.IsId(from) || from == Cfg.Id || !Util.IsId(id)) return;
         Seen(from, Util.Str(h, "name"), ch.RemoteIp, (int)Util.Num(h, "port"), false);
 
@@ -664,7 +673,7 @@ public partial class Node : IDisposable {
         } else if (type == "file") {
             if (have) { ch.SendJson(new { ok = true, have = true }); return; }
             ReceiveFile(ch, h, m);
-        } else Reply(ch, false, "版本不一致");
+        } else Reply(ch, false, OldVersion);
     }
 
     void ReceiveFile(Channel ch, Dictionary<string, object> h, ChatMsg m) {
@@ -675,25 +684,25 @@ public partial class Node : IDisposable {
         List<string> paths = new List<string>(); List<long> sizes = new List<long>();
         long sum = 0;
         IEnumerable list = h.ContainsKey("files") ? h["files"] as IEnumerable : null;
-        if (list == null) { Reply(ch, false, "文件列表无效"); return; }
+        if (list == null) { Reply(ch, false, BadList); return; }
         HashSet<string> seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (object o in list) {
             Dictionary<string, object> f = o as Dictionary<string, object>;
-            if (f == null) { Reply(ch, false, "文件列表无效"); return; }
+            if (f == null) { Reply(ch, false, BadList); return; }
             string rel = Util.SafeRelative(Util.Str(f, "p"));
             rel = folder ? Util.UniqueRel(rel, seen) : m.Text;
             long s = Util.Num(f, "s");
-            if (s < 0) { Reply(ch, false, "文件列表无效"); return; }
+            if (s < 0) { Reply(ch, false, BadList); return; }
             paths.Add(rel); sizes.Add(s); sum += s;
         }
-        if (sum != m.Size || paths.Count > MaxFiles || (!folder && paths.Count != 1)) { Reply(ch, false, "文件列表无效"); return; }
+        if (sum != m.Size || paths.Count > MaxFiles || (!folder && paths.Count != 1)) { Reply(ch, false, BadList); return; }
         try {
             Directory.CreateDirectory(Cfg.SaveDir);
-            if (new DriveInfo(Path.GetPathRoot(Path.GetFullPath(Cfg.SaveDir))).AvailableFreeSpace < sum + 50L * 1024 * 1024) { Reply(ch, false, "对方磁盘空间不足"); return; }
+            if (new DriveInfo(Path.GetPathRoot(Path.GetFullPath(Cfg.SaveDir))).AvailableFreeSpace < sum + 50L * 1024 * 1024) { Reply(ch, false, Lang.M("对方磁盘空间不足", "not enough disk space on the other PC")); return; }
         } catch (ArgumentException) { } // network share: no way to check
-        catch (Exception e) { Reply(ch, false, "对方无法保存：" + e.Message); return; }
+        catch (Exception e) { Reply(ch, false, Lang.M("对方无法保存：{0}", "the other PC can't save it: {0}", e.Message)); return; }
 
-        lock (L) { if (!busy.Add("recv" + m.Id)) { Reply(ch, false, "正在接收"); return; } }
+        lock (L) { if (!busy.Add("recv" + m.Id)) { Reply(ch, false, Lang.M("正在接收", "already receiving it")); return; } }
         try {
             if (Directory.Exists(stage)) Directory.Delete(stage, true);
             Directory.CreateDirectory(Path.Combine(stage, m.Text));
@@ -704,13 +713,13 @@ public partial class Node : IDisposable {
             DateTime tick = DateTime.UtcNow;
             for (int i = 0; i < paths.Count; i++) {
                 string dest = Path.GetFullPath(Path.Combine(root, paths[i]));
-                if (!dest.StartsWith(Path.GetFullPath(root) + "\\", StringComparison.OrdinalIgnoreCase)) throw new IOException("非法路径");
+                if (!dest.StartsWith(Path.GetFullPath(root) + "\\", StringComparison.OrdinalIgnoreCase)) throw Lang.Err("非法路径", "illegal path");
                 Directory.CreateDirectory(Path.GetDirectoryName(dest));
                 using (FileStream fs = new FileStream(dest, FileMode.CreateNew, FileAccess.Write, FileShare.None, 65536)) {
                     long left = sizes[i];
                     while (left > 0) {
                         byte[] d = ch.Receive();
-                        if (d.Length == 0 || d.Length > left) throw new IOException("数据长度错误");
+                        if (d.Length == 0 || d.Length > left) throw Lang.Err("数据长度错误", "wrong data length");
                         fs.Write(d, 0, d.Length);
                         left -= d.Length; m.Done += d.Length;
                         if ((DateTime.UtcNow - tick).TotalMilliseconds > 150) { tick = DateTime.UtcNow; Changed(m, false); }
@@ -728,9 +737,9 @@ public partial class Node : IDisposable {
             Reply(ch, true, null);
         } catch (Exception e) {
             if (m.State != "ok") {
-                m.State = "fail"; m.Error = e is EndOfStreamException || e.InnerException is SocketException ? "传输中断" : e.Message;
+                m.State = "fail"; m.Err(e is EndOfStreamException || e.InnerException is SocketException ? Lang.M("传输中断", "transfer interrupted") : Msg.Of(e));
                 Changed(m, true);
-                if (!(e is EndOfStreamException)) try { Reply(ch, false, "对方保存失败：" + e.Message); } catch (Exception) { }
+                if (!(e is EndOfStreamException)) try { Reply(ch, false, Lang.M("对方保存失败：{0}", "the other PC couldn't save it: {0}", e.Message)); } catch (Exception) { }
             }
         } finally {
             lock (L) busy.Remove("recv" + m.Id);

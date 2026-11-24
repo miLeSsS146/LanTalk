@@ -26,7 +26,7 @@ static partial class Test {
         string d = Path.Combine(root, name);
         Directory.CreateDirectory(d);
         Node n = new Node(d, IPAddress.Loopback);
-        n.Cfg.Name = name; n.Cfg.Port = port; n.Cfg.SaveDir = Path.Combine(root, name + "-收到");
+        n.Cfg.Name = name; n.Cfg.Port = port; n.Cfg.Lang = "zh"; n.Cfg.SaveDir = Path.Combine(root, name + "-收到");
         n.Cfg.Manual = others.Select(delegate (int p) { return "127.0.0.1:" + p; }).ToList();
         n.SetCode(code);
         return n;
@@ -146,9 +146,11 @@ static partial class Test {
         File.WriteAllText(small, "cli"); o = Lt(da, out rc, "file --to PC-B \"" + small + "\""); Check(rc == 0, "lt file: " + o.Trim());
         o = Lt(db, out rc, "wait --timeout 5 --json --ascii"); Check(rc == 0 && o.All(delegate (char c) { return c < 128; }) && o.Contains("a (") , "lt file shows up with its saved path, --ascii");
         o = Lt(da, out rc, "send --to nobody hi"); Check(rc == 1 && o.Contains("没有叫"), "lt: unknown PC is an error");
+        Directory.CreateDirectory(Path.Combine(root, "none")); File.WriteAllText(Path.Combine(root, "none", "config.json"), "{\"Lang\":\"zh\"}");
         o = Lt(Path.Combine(root, "none"), out rc, "list"); Check(rc == 2 && o.Contains("没有运行"), "lt: app not running is an error");
 
         ControlTests(A, B, C, da, db);
+        LangTests(A, B, da);
 
         // offline queue, restart
         B.Dispose();

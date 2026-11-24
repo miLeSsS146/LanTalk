@@ -4,7 +4,7 @@
 
 <p align="center">让局域网里的几台 Windows 电脑互相聊天、传文件，<br>也让每台电脑上的 Claude Code 能彼此沟通、到对方那台上干活。</p>
 
-<p align="center"><b>简体中文</b> · <a href="#english">English</a></p>
+<p align="center"><b>简体中文</b> · <a href="README.en.md">English</a></p>
 
 ![主窗口：几台电脑上的 Claude 在协作频道里交流](docs/main.png)
 
@@ -21,6 +21,7 @@ LanTalk 给它们一条直通的线路，你也在同一个窗口里看着。消
 - **聊天和传文件**：文字、图片、文件、整个文件夹，拖进窗口就发。对方不在线会排队，上线后自动送达。
 - **Claude 协作频道**：命令行 `lt` 让 Claude Code 收发消息和文件，你在窗口里看得到，也能发言。
 - **远程控制**（默认关闭）：授权之后，一台电脑上的 Claude 可以在另一台上运行 PowerShell 命令、读写文件。
+- **中英双语**：在设置里切换，立即生效。语言不同的电脑之间也能正常配合。
 - **零依赖**：C# 写成，用 Windows 自带的编译器就能编译，不用装 SDK，不用联网下载任何包。
 
 ## 快速开始
@@ -98,7 +99,7 @@ lt.exe get --to 客厅主机 'D:\项目\report.html' report.html
 - 完整路径超过约 260 个字符的文件会失败；空文件夹不会传过去；一次最多 20000 个文件。
 - `lt` 只能在运行 LanTalk 的桌面会话里用，不能经 SSH 调用。
 - 远程控制只有命令和文件，看不到对方屏幕，也不能操作鼠标键盘。
-- 界面只有中文，默认数据目录是 `D:\LanTalk`。
+- 默认数据目录是 `D:\LanTalk`。
 
 ## 代码结构
 
@@ -106,12 +107,13 @@ lt.exe get --to 客厅主机 'D:\项目\report.html' report.html
 |---|---|
 | `Core.cs` | 发现、加密通道、消息队列、收发文件、历史记录 |
 | `Control.cs` | 远程控制：身份、授权、执行命令、读写文件 |
+| `Lang.cs` | 语言。每条文字都在用到的地方中英成对写着 |
 | `Ipc.cs` / `Cli.cs` | 程序与 `lt.exe` 之间的本机管道 / 命令行 |
 | `Look.cs` / `Ui.cs` / `ControlUi.cs` | 配色与自绘控件 / 主窗口与设置 / 权限与确认窗口 |
 | `icon/make-icon.py` | 生成图标（需要 Pillow，编译时不需要） |
 | `update/` | 一键更新脚本；把编译好的两个 exe 放进去，拷到目标电脑双击 `update.cmd` |
 
-跑测试：双击 `tests\run-tests.cmd`。80 项，只走本机回环，用临时目录，不碰真实数据。
+跑测试：双击 `tests\run-tests.cmd`。93 项，只走本机回环，用临时目录，不碰真实数据。
 
 ## 声明
 
@@ -120,19 +122,3 @@ LanTalk 是个人项目，与 Anthropic 没有从属或合作关系，也未获�
 ## 许可
 
 [MIT](LICENSE)
-
----
-
-<a id="english"></a>
-
-## English
-
-LanTalk connects a few Windows PCs on the same local network. You can chat and send files, and the Claude Code running on each PC can talk to the others through a small command line, `lt.exe`. There is no server and no account.
-
-With permission, Claude on one PC can also run PowerShell commands and read or write files on another. This is **off by default**. The person at the controlled PC turns it on for each peer ("ask every time" or "always allow"). Every request is signed with the asking PC's own key, shows up in the chat on both sides, and can be stopped from either side.
-
-**Build:** double-click `build.cmd`. It uses the C# compiler that ships with Windows, so there is nothing to install. Needs Windows 10 or 11.
-
-**Security:** not audited. Use it only on a LAN you trust. Traffic is encrypted and authenticated with keys derived from a shared pairing code, but there is no forward secrecy, anyone with the code is trusted to message you, and "always allow" means handing over that PC.
-
-The interface and documentation are in Chinese. Not affiliated with or endorsed by Anthropic. MIT licensed.

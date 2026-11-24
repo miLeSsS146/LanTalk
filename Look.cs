@@ -34,6 +34,9 @@ public static class Theme {
         return TextRenderer.MeasureText(screen, s, f, room, flags);
     }
 
+    // Height of wrapped text; translations differ a lot in length.
+    public static int TextHeight(string s, Font f, int width) { return Measure(s, f, new Size(width, int.MaxValue), TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix | TextFormatFlags.WordBreak).Height; }
+
     // Embedded by build.cmd (/resource:LanTalk.ico); drawn by icon\make-icon.py.
     public static Icon AppIcon() { return AppIcon(SystemInformation.IconSize); }
     public static Icon AppIcon(Size size) {

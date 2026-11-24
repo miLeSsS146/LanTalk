@@ -36,24 +36,24 @@ public class ControlForm : Form {
         node = n; peer = p; key = currentKey;
         Grant g = n.GrantFor(p.Id);
         bool changed = g != null && key != null && g.Key != key;
-        Text = "LanTalk 控制权限"; Font = Theme.Body; BackColor = Theme.Back; ForeColor = Theme.Text; Icon = Theme.AppIcon();
+        Text = Lang.T("LanTalk 控制权限", "LanTalk control access"); Font = Theme.Body; BackColor = Theme.Back; ForeColor = Theme.Text; Icon = Theme.AppIcon();
         FormBorderStyle = FormBorderStyle.FixedDialog; MaximizeBox = MinimizeBox = false; StartPosition = FormStartPosition.CenterParent; ShowInTaskbar = false;
         int y = Theme.S(16);
-        Add(Line("允许 " + p.Name + " 控制这台电脑？", Theme.Greeting, Theme.Text, 17, ref y, 46));
+        Add(Line(Lang.T("允许 {0} 控制这台电脑？", "Let {0} control this PC?", p.Name), Theme.Greeting, Theme.Text, 17, ref y, 46));
         y += Theme.S(2);
-        Add(Line("指 " + p.Name + " 上的 Claude（或人）通过 lt run / put / get 在这台电脑上运行命令、读写文件。", Theme.Small, Theme.Dim, 21, ref y, 26));
+        Add(Line(Lang.T("指 {0} 上的 Claude（或人）通过 lt run / put / get 在这台电脑上运行命令、读写文件。", "That is: Claude (or a person) on {0} running commands and reading or writing files on this PC through lt run / put / get.", p.Name), Theme.Small, Theme.Dim, 21, ref y, 26));
         y += Theme.S(6);
-        Card(no, "不允许", "默认。对方仍然可以聊天和传文件。", ref y, 64);
-        Card(ask, "每次询问", "每条命令都在这台电脑上弹窗，你看过再决定。60 秒没人理就拒绝。", ref y, 64);
-        Card(allow, "直接允许", "不再询问。它能运行这个 Windows 账户能运行的任何东西、读改任何文件，和你自己坐在这里一样。请只给你自己的、别人碰不到的电脑。", ref y, 84);
+        Card(no, Lang.T("不允许", "No"), Lang.T("默认。对方仍然可以聊天和传文件。", "The default. The other PC can still chat and send files."), ref y);
+        Card(ask, Lang.T("每次询问", "Ask every time"), Lang.T("每条命令都在这台电脑上弹窗，你看过再决定。60 秒没人理就拒绝。", "Every command pops up on this PC and you decide. No answer within 60 seconds means no."), ref y);
+        Card(allow, Lang.T("直接允许", "Always allow"), Lang.T("不再询问。它能运行这个 Windows 账户能运行的任何东西、读改任何文件，和你自己坐在这里一样。请只给你自己的、别人碰不到的电脑。", "No more questions. It can run anything and change any file this Windows account can, as if you were sitting here. Only for your own PCs that nobody else can get to."), ref y);
         y += Theme.S(6);
-        string note = key == null ? "对方现在联系不上，只能取消授权：" + problem
-            : changed ? "注意：" + p.Name + " 的身份变了（重装过，或者有人在冒充）。原来的授权已经不能用，要继续请核对校验码后重新选择。"
-            : "请核对：" + p.Name + " 的 LanTalk“设置”里显示的本机校验码应当是";
-        Add(Line(note, Theme.Small, key == null || changed ? Theme.Bad : Theme.Dim, 21, ref y, changed ? 40 : 24));
+        string note = key == null ? Lang.T("对方现在联系不上，只能取消授权：", "The other PC can't be reached now, so access can only be removed: ") + problem
+            : changed ? Lang.T("注意：{0} 的身份变了（重装过，或者有人在冒充）。原来的授权已经不能用，要继续请核对校验码后重新选择。", "Careful: the identity of {0} has changed (reinstalled, or someone is posing as it). The old access no longer works. To go on, compare the check code and choose again.", p.Name)
+            : Lang.T("请核对：{0} 的 LanTalk“设置”里显示的本机校验码应当是", "Compare: Settings in LanTalk on {0} should show this check code", p.Name);
+        Add(Line(note, Theme.Small, key == null || changed ? Theme.Bad : Theme.Dim, 21, ref y, 24));
         if (key != null) Add(Line(Node.Fingerprint(key), Theme.Mono, Theme.Text, 21, ref y, 28));
         y += Theme.S(12);
-        RButton ok = RButton.Primary("确定"), cancel = RButton.Outline("取消");
+        RButton ok = RButton.Primary(Lang.T("确定", "OK")), cancel = RButton.Outline(Lang.T("取消", "Cancel"));
         cancel.DialogResult = DialogResult.Cancel;
         cancel.SetBounds(Theme.S(314), y, Theme.S(96), Theme.S(38)); ok.SetBounds(Theme.S(418), y, Theme.S(96), Theme.S(38));
         ok.Click += delegate { Save(); };
@@ -66,19 +66,21 @@ public class ControlForm : Form {
     void Add(Control c) { Controls.Add(c); }
     static Label Line(string text, Font f, Color c, int x, ref int y, int h) {
         Label l = new Label(); l.Text = text; l.Font = f; l.ForeColor = c; l.UseMnemonic = false; l.TextAlign = ContentAlignment.MiddleLeft;
-        l.SetBounds(Theme.S(x), y, Theme.S(500), Theme.S(h)); y += Theme.S(h);
+        int w = Theme.S(496), need = Math.Max(Theme.S(h), Theme.TextHeight(text, f, w - Theme.S(8)) + Theme.S(8));
+        l.SetBounds(Theme.S(x), y, w, need); y += need;
         return l;
     }
-    void Card(ChoiceCard c, string title, string sub, ref int y, int h) {
+    void Card(ChoiceCard c, string title, string sub, ref int y) {
         c.Text = title; c.Sub = sub; c.AccessibleDescription = sub;
-        c.SetBounds(Theme.S(24), y, Theme.S(490), Theme.S(h)); y += Theme.S(h + 8);
+        int h = Theme.S(48) + Theme.TextHeight(sub, Theme.Small, Theme.S(490 - 46 - 16)); // text area of ChoiceCard
+        c.SetBounds(Theme.S(24), y, Theme.S(490), h); y += h + Theme.S(8);
         Controls.Add(c);
     }
     void Save() {
         Grant g = node.GrantFor(peer.Id);
         string mode = allow.Checked ? "allow" : ask.Checked ? "ask" : "";
         bool same = g != null && g.Mode == mode && g.Key == key;
-        if (mode == "allow" && !same && MessageBox.Show(this, "让 " + peer.Name + " 不经询问就控制这台电脑？\n\n校验码：" + Node.Fingerprint(key) + "\n请确认它和 " + peer.Name + " 上显示的一致。", "LanTalk", MessageBoxButtons.OKCancel, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.OK) return;
+        if (mode == "allow" && !same && MessageBox.Show(this, Lang.T("让 {0} 不经询问就控制这台电脑？\n\n校验码：{1}\n请确认它和 {0} 上显示的一致。", "Let {0} control this PC without asking?\n\nCheck code: {1}\nMake sure {0} shows the same one.", peer.Name, Node.Fingerprint(key)), "LanTalk", MessageBoxButtons.OKCancel, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.OK) return;
         if (!same) node.SetGrant(peer.Id, peer.Name, key, mode);
         DialogResult = DialogResult.OK;
     }
@@ -88,24 +90,24 @@ public class ControlForm : Form {
 public class AskForm : Form {
     readonly ControlAsk ask;
     readonly Timer tick = new Timer();
-    readonly RButton no = RButton.Outline("拒绝");
+    readonly RButton no = RButton.Outline("");
     readonly DateTime end = DateTime.UtcNow.AddSeconds(ControlAsk.Seconds);
 
     public AskForm(ControlAsk a) {
         ask = a;
-        Text = "LanTalk 远程控制"; Font = Theme.Body; BackColor = Theme.Back; ForeColor = Theme.Text; Icon = Theme.AppIcon();
+        Text = Lang.T("LanTalk 远程控制", "LanTalk remote control"); Font = Theme.Body; BackColor = Theme.Back; ForeColor = Theme.Text; Icon = Theme.AppIcon();
         FormBorderStyle = FormBorderStyle.FixedDialog; MaximizeBox = MinimizeBox = false; StartPosition = FormStartPosition.CenterScreen; TopMost = true;
-        Label head = new Label(); head.Text = a.PeerName + " 想在这台电脑上执行"; head.Font = Theme.Greeting; head.UseMnemonic = false; head.TextAlign = ContentAlignment.MiddleLeft; head.AutoEllipsis = true;
+        Label head = new Label(); head.Text = Lang.T("{0} 想在这台电脑上执行", "{0} wants to run this here", a.PeerName); head.Font = Theme.Greeting; head.UseMnemonic = false; head.TextAlign = ContentAlignment.MiddleLeft; head.AutoEllipsis = true;
         head.SetBounds(Theme.S(17), Theme.S(16), Theme.S(590), Theme.S(46));
         CardPanel box = new CardPanel(); box.Corner = 9; box.SetBounds(Theme.S(24), Theme.S(74), Theme.S(580), Theme.S(200));
-        TextBox t = new TextBox(); t.Multiline = true; t.ReadOnly = true; t.BorderStyle = BorderStyle.None; t.ScrollBars = ScrollBars.Vertical; t.Font = Theme.Mono; t.BackColor = Theme.Card; t.ForeColor = Theme.Text; t.TabStop = false; t.AccessibleName = "要执行的内容";
+        TextBox t = new TextBox(); t.Multiline = true; t.ReadOnly = true; t.BorderStyle = BorderStyle.None; t.ScrollBars = ScrollBars.Vertical; t.Font = Theme.Mono; t.BackColor = Theme.Card; t.ForeColor = Theme.Text; t.TabStop = false; t.AccessibleName = Lang.T("要执行的内容", "What would run");
         t.Text = Plain(a.Text); t.SetBounds(Theme.S(12), Theme.S(10), Theme.S(558), Theme.S(180));
         box.Controls.Add(t);
-        Label who = new Label(); who.Text = "由那台电脑上的 " + a.Agent + " 发起。看不懂就拒绝。"; who.Font = Theme.Small; who.ForeColor = Theme.Dim; who.UseMnemonic = false;
+        Label who = new Label(); who.Text = Lang.T("由那台电脑上的 {0} 发起。看不懂就拒绝。", "Asked for by {0} on that PC. If it makes no sense to you, decline.", a.Agent); who.Font = Theme.Small; who.ForeColor = Theme.Dim; who.UseMnemonic = false;
         who.SetBounds(Theme.S(21), Theme.S(282), Theme.S(580), Theme.S(24));
-        RButton once = RButton.Primary("允许这一次"), longer = RButton.Outline("30 分钟内都允许");
+        RButton once = RButton.Primary(Lang.T("允许这一次", "Allow once")), longer = RButton.Outline(Lang.T("30 分钟内都允许", "Allow for 30 minutes"));
         no.SetBounds(Theme.S(24), Theme.S(318), Theme.S(120), Theme.S(38));
-        longer.SetBounds(Theme.S(318), Theme.S(318), Theme.S(150), Theme.S(38)); once.SetBounds(Theme.S(476), Theme.S(318), Theme.S(128), Theme.S(38));
+        longer.SetBounds(Theme.S(298), Theme.S(318), Theme.S(170), Theme.S(38)); once.SetBounds(Theme.S(476), Theme.S(318), Theme.S(128), Theme.S(38));
         no.Click += delegate { Answer(false, false); }; once.Click += delegate { Answer(true, false); }; longer.Click += delegate { Answer(true, true); };
         Controls.AddRange(new Control[] { no, longer, once, head, box, who });
         ClientSize = new Size(Theme.S(628), Theme.S(378));
@@ -117,7 +119,7 @@ public class AskForm : Form {
     }
     protected override bool ShowWithoutActivation { get { return true; } }
     protected override void OnHandleCreated(EventArgs e) { base.OnHandleCreated(e); Theme.Chrome(this, Theme.Back); }
-    void ShowLeft() { no.Text = "拒绝（" + Math.Max(0, (int)(end - DateTime.UtcNow).TotalSeconds) + "）"; no.Invalidate(); }
+    void ShowLeft() { no.Text = Lang.T("拒绝（{0}）", "Decline ({0})", Math.Max(0, (int)(end - DateTime.UtcNow).TotalSeconds)); no.Invalidate(); }
     void Answer(bool ok, bool longer) { ask.Answer(ok, longer); Close(); }
     static bool Hidden(System.Globalization.UnicodeCategory c) { return c == System.Globalization.UnicodeCategory.Format || c == System.Globalization.UnicodeCategory.LineSeparator || c == System.Globalization.UnicodeCategory.ParagraphSeparator; }
     // Invisible and text-direction characters could make a command read differently from what runs.

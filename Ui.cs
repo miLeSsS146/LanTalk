@@ -101,8 +101,8 @@ public class ChatView : Control {
             ChatMsg m = it.M;
             Rectangle b = it.Bubble; b.Offset(0, -off);
             bool agent = !string.IsNullOrEmpty(m.Agent);
-            string status = m.Kind == "run" ? (it.Mine ? "远程执行" : "控制了这台电脑") + " · " + (m.State == "run" ? "运行中（右键停止）" : m.Error) : it.Mine ? Status(m) : (m.State == "fail" ? "接收失败：" + m.Error : "");
-            string head = (it.Mine ? (agent ? m.Agent + "（本机）" : "") : (agent ? m.Agent + " @ " + m.FromName : m.FromName)) + "  " + Stamp(m.LocalTime) + (status != "" ? "  · " + status : "");
+            string status = m.Kind == "run" ? (it.Mine ? Lang.T("远程执行", "remote command") : Lang.T("控制了这台电脑", "controlled this PC")) + " · " + (m.State == "run" ? Lang.T("运行中（右键停止）", "running (right-click to stop)") : m.ErrText) : it.Mine ? Status(m) : (m.State == "fail" ? Lang.T("接收失败：", "not received: ") + m.ErrText : "");
+            string head = (it.Mine ? (agent ? m.Agent + Lang.T("（本机）", " (this PC)") : "") : (agent ? m.Agent + " @ " + m.FromName : m.FromName)) + "  " + Stamp(m.LocalTime) + (status != "" ? "  · " + status : "");
             Rectangle hr = it.Head; hr.Offset(0, -off);
             TextRenderer.DrawText(g, head.Trim(), Theme.Small, hr, m.State == "fail" ? Theme.Bad : agent ? Theme.AccentText : Theme.Dim, TextFormatFlags.NoPadding | (it.Mine ? TextFormatFlags.Right : TextFormatFlags.Left) | TextFormatFlags.Bottom | TextFormatFlags.NoPrefix | TextFormatFlags.EndEllipsis | TextFormatFlags.SingleLine);
             Theme.Fill(g, b, Theme.S(24), m.Kind == "run" ? Theme.Side : agent ? Theme.AgentFill : it.Mine ? Theme.Mine : Theme.Theirs, m.Kind == "run" ? (m.State == "run" ? Theme.Accent : Theme.Line) : agent ? Theme.AgentLine : it.Mine ? Color.Empty : Theme.Line);
@@ -132,18 +132,18 @@ public class ChatView : Control {
         if (items.Count == 0) {
             TextFormatFlags mid = TextFormatFlags.HorizontalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine | TextFormatFlags.VerticalCenter;
             int c = ClientSize.Height / 2;
-            TextRenderer.DrawText(g, "还没有消息", Theme.Greeting, new Rectangle(0, c - Theme.S(44), ClientSize.Width, Theme.S(44)), Theme.Text, mid);
-            TextRenderer.DrawText(g, "写点什么，或者直接把文件、文件夹拖进来。", Theme.Body, new Rectangle(0, c + Theme.S(4), ClientSize.Width, Theme.S(28)), Theme.Dim, mid);
+            TextRenderer.DrawText(g, Lang.T("还没有消息", "No messages yet"), Theme.Greeting, new Rectangle(0, c - Theme.S(44), ClientSize.Width, Theme.S(44)), Theme.Text, mid);
+            TextRenderer.DrawText(g, Lang.T("写点什么，或者直接把文件、文件夹拖进来。", "Write something, or drop files and folders here."), Theme.Body, new Rectangle(0, c + Theme.S(4), ClientSize.Width, Theme.S(28)), Theme.Dim, mid);
         }
     }
     static string TextOf(ChatMsg m) { string t = m.Text ?? ""; return m.Kind != "run" ? t : t.Length <= 1500 ? AskForm.Plain(t) : AskForm.Plain(t.Substring(0, 1500)) + "…"; }
     static string Stamp(DateTime t) { return t.Date == DateTime.Today ? t.ToString("HH:mm") : t.ToString("M-d HH:mm"); }
     static string Status(ChatMsg m) {
         switch (m.State) {
-            case "queued": return "等待对方上线";
-            case "sending": return "发送中";
-            case "fail": return "失败（右键重试） " + m.Error;
-            case "cancel": return "已取消";
+            case "queued": return Lang.T("等待对方上线", "waiting for the other PC");
+            case "sending": return Lang.T("发送中", "sending");
+            case "fail": return Lang.T("失败（右键重试） ", "failed (right-click to retry) ") + m.ErrText;
+            case "cancel": return Lang.T("已取消", "cancelled");
         }
         return "";
     }
@@ -167,7 +167,8 @@ public class MainForm : Form {
     readonly HintBox input = new HintBox();
     readonly Panel bottom = new Panel();
     readonly CardPanel card = new CardPanel();
-    readonly RButton perm = new RButton("控制权限", "\uE72E");
+    readonly RButton perm = new RButton("", "\uE72E"), set = new RButton("", "\uE713"), bo = new RButton("", "\uE838"), bf = new RButton("", "\uE723"), bd = new RButton("", "\uE8B7"), send = RButton.Primary("");
+    readonly ToolTip tips = new ToolTip();
     readonly Dictionary<string, DateTime> toldControl = new Dictionary<string, DateTime>();
     readonly NotifyIcon tray = new NotifyIcon();
     readonly Dictionary<string, int> unread = new Dictionary<string, int>();
@@ -187,32 +188,28 @@ public class MainForm : Form {
         side.Paint += delegate (object s, PaintEventArgs e) { using (Pen p = new Pen(Theme.Line)) e.Graphics.DrawLine(p, side.Width - 1, 0, side.Width - 1, side.Height); };
         BrandBar brand = new BrandBar(); brand.Dock = DockStyle.Top; brand.Height = Theme.S(68);
         list.Dock = DockStyle.Fill; list.BorderStyle = BorderStyle.None; list.BackColor = Theme.Side; list.DrawMode = DrawMode.OwnerDrawFixed; list.ItemHeight = Theme.S(60); list.IntegralHeight = false;
-        list.AccessibleName = "会话列表";
         list.DrawItem += DrawConv;
         list.SelectedIndexChanged += delegate { if (!filling && list.SelectedItem != null) Select(((Conv)list.SelectedItem).Id); };
         list.MouseDown += ListMouse;
         Panel foot = new Panel(); foot.Dock = DockStyle.Bottom; foot.Height = Theme.S(58); foot.BackColor = Theme.Side; foot.Padding = new Padding(Theme.S(10), Theme.S(8), Theme.S(10), Theme.S(12));
-        RButton set = new RButton("设置", "\uE713"); set.Dock = DockStyle.Fill; set.LeftAlign = true; set.Click += delegate { OpenSettings(); };
+        set.Dock = DockStyle.Fill; set.LeftAlign = true; set.Click += delegate { OpenSettings(); };
         foot.Controls.Add(set);
         side.Controls.Add(list); side.Controls.Add(brand); side.Controls.Add(foot);
 
         title.Dock = DockStyle.Top; title.Height = Theme.S(68);
-        RButton bo = new RButton("打开接收目录", "\uE838"); bo.Hover = Theme.Side; bo.Size = new Size(bo.FitWidth, Theme.S(34));
+        bo.Hover = Theme.Side;
         bo.Click += delegate { Directory.CreateDirectory(node.Cfg.SaveDir); Process.Start("explorer.exe", "\"" + node.Cfg.SaveDir + "\""); };
-        perm.Hover = Theme.Side; perm.Size = new Size(perm.FitWidth, Theme.S(34)); perm.Click += delegate { EditGrant(); };
+        perm.Hover = Theme.Side; perm.Click += delegate { EditGrant(); };
         title.Controls.Add(bo); title.Controls.Add(perm);
         title.Layout += delegate { bo.Location = new Point(title.Width - bo.Width - Theme.S(14), (title.Height - bo.Height) / 2); perm.Location = new Point(bo.Left - perm.Width, bo.Top); title.RightSpace = title.Width - (perm.Visible ? perm.Left : bo.Left); };
 
         bottom.Dock = DockStyle.Bottom; bottom.BackColor = Theme.Back;
-        RButton bf = new RButton("文件", "\uE723"), bd = new RButton("文件夹", "\uE8B7"), send = RButton.Primary("");
-        foreach (RButton b in new RButton[] { bf, bd }) { b.Hover = Theme.Side; b.ForeColor = Theme.Dim; b.Size = new Size(b.FitWidth, Theme.S(34)); }
-        bf.AccessibleName = "发文件"; bd.AccessibleName = "发文件夹"; send.AccessibleName = "发送";
+        foreach (RButton b in new RButton[] { bf, bd }) { b.Hover = Theme.Side; b.ForeColor = Theme.Dim; }
         send.Icon = "\uE74A"; send.Size = new Size(Theme.S(38), Theme.S(34));
-        ToolTip tips = new ToolTip(); tips.SetToolTip(send, "发送（回车）"); tips.SetToolTip(bf, "发文件，也可以拖进窗口"); tips.SetToolTip(bd, "发文件夹，也可以拖进窗口");
         bf.Click += delegate { using (OpenFileDialog d = new OpenFileDialog()) { d.Multiselect = true; if (d.ShowDialog(this) == DialogResult.OK) SendPaths(d.FileNames); } };
         bd.Click += delegate { using (FolderBrowserDialog d = new FolderBrowserDialog()) { if (d.ShowDialog(this) == DialogResult.OK) SendPaths(new string[] { d.SelectedPath }); } };
         send.Click += delegate { SendText(); };
-        input.Multiline = true; input.BorderStyle = BorderStyle.None; input.Font = Theme.Body; input.BackColor = Theme.Card; input.ForeColor = Theme.Text; input.MaxLength = Node.MaxText; input.AccessibleName = "输入消息，回车发送，Shift+回车换行";
+        input.Multiline = true; input.BorderStyle = BorderStyle.None; input.Font = Theme.Body; input.BackColor = Theme.Card; input.ForeColor = Theme.Text; input.MaxLength = Node.MaxText;
         input.KeyDown += InputKey;
         input.TextChanged += delegate { PlaceComposer(); };
         card.Corner = 14; card.Controls.Add(input); card.Controls.Add(bf); card.Controls.Add(bd); card.Controls.Add(send);
@@ -236,8 +233,9 @@ public class MainForm : Form {
 
         tray.Icon = Theme.AppIcon(SystemInformation.SmallIconSize); tray.Text = Util.Cut("LanTalk · " + n.Cfg.Name, 60);
         tray.ContextMenuStrip = Theme.Menu();
-        tray.ContextMenuStrip.Items.Add("打开", null, delegate { ShowUp(); });
-        tray.ContextMenuStrip.Items.Add("退出", null, delegate { quitting = true; Close(); });
+        tray.ContextMenuStrip.Items.Add("", null, delegate { ShowUp(); });
+        tray.ContextMenuStrip.Items.Add("", null, delegate { quitting = true; Close(); });
+        ApplyTexts();
         tray.MouseClick += delegate (object s, MouseEventArgs e) { if (e.Button == MouseButtons.Left) ShowUp(); };
         tray.BalloonTipClicked += delegate { ShowUp(); };
 
@@ -250,6 +248,18 @@ public class MainForm : Form {
         RefreshList(); Select(Node.Ai);
     }
     public void ShowTray() { tray.Visible = true; }
+    // Everything that keeps its text; the rest is written when drawn or opened.
+    void ApplyTexts() {
+        list.AccessibleName = Lang.T("会话列表", "Conversations");
+        set.Text = Lang.T("设置", "Settings"); bo.Text = Lang.T("打开接收目录", "Received files"); perm.Text = Lang.T("控制权限", "Control access");
+        bf.Text = Lang.T("文件", "File"); bd.Text = Lang.T("文件夹", "Folder");
+        foreach (RButton b in new RButton[] { bo, perm, bf, bd }) b.Size = new Size(b.FitWidth, Theme.S(34));
+        bf.AccessibleName = Lang.T("发文件", "Send a file"); bd.AccessibleName = Lang.T("发文件夹", "Send a folder"); send.AccessibleName = Lang.T("发送", "Send");
+        tips.SetToolTip(send, Lang.T("发送（回车）", "Send (Enter)")); tips.SetToolTip(bf, Lang.T("发文件，也可以拖进窗口", "Send a file, or drop it on the window")); tips.SetToolTip(bd, Lang.T("发文件夹，也可以拖进窗口", "Send a folder, or drop it on the window"));
+        input.AccessibleName = Lang.T("输入消息，回车发送，Shift+回车换行", "Message. Enter sends, Shift+Enter starts a new line");
+        tray.ContextMenuStrip.Items[0].Text = Lang.T("打开", "Open"); tray.ContextMenuStrip.Items[1].Text = Lang.T("退出", "Quit");
+        title.PerformLayout(); card.PerformLayout(); view.Invalidate();
+    }
     protected override void OnHandleCreated(EventArgs e) { base.OnHandleCreated(e); Theme.Chrome(this, Theme.Side); }
     // Keeps the composer in the same column as the messages and grows it with the text, 2 to 8 lines.
     bool placing;
@@ -275,8 +285,8 @@ public class MainForm : Form {
     // ---- conversations ----
     void RefreshList() {
         List<Conv> l = new List<Conv>();
-        Conv ai = new Conv(); ai.Id = Node.Ai; ai.Title = "Claude 协作"; ai.Online = true; l.Add(ai);
-        Conv all = new Conv(); all.Id = Node.All; all.Title = "所有电脑"; all.Online = true; l.Add(all);
+        Conv ai = new Conv(); ai.Id = Node.Ai; ai.Title = Lang.T("Claude 协作", "Claude channel"); ai.Online = true; l.Add(ai);
+        Conv all = new Conv(); all.Id = Node.All; all.Title = Lang.T("所有电脑", "All PCs"); all.Online = true; l.Add(all);
         foreach (Peer p in node.Peers().OrderBy(delegate (Peer x) { return x.Name; })) { Conv c = new Conv(); c.Id = p.Id; c.Title = p.Name; c.Online = p.Online; l.Add(c); }
         if (!l.Exists(delegate (Conv c) { return c.Id == current; })) current = Node.Ai;
         filling = true;
@@ -300,9 +310,9 @@ public class MainForm : Form {
         if (c == null) return;
         int on = node.Peers().Count(delegate (Peer p) { return p.Online; });
         title.Text = c.Title;
-        title.Sub = c.Id == Node.Ai ? "各电脑的 Claude Code 在这里交流，你也可以发言 · " + on + " 台在线"
-            : c.Id == Node.All ? on + " 台在线" : c.Online ? "在线" : "离线，消息会在对方上线后送达";
-        input.Hint = "发消息到 " + c.Title;
+        title.Sub = c.Id == Node.Ai ? Lang.T("各电脑的 Claude Code 在这里交流，你也可以发言 · {0} 台在线", "Where Claude Code on your PCs talks. You can join in · {0} online", on)
+            : c.Id == Node.All ? Lang.T("{0} 台在线", "{0} online", on) : c.Online ? Lang.T("在线", "Online") : Lang.T("离线，消息会在对方上线后送达", "Offline. Messages arrive when it is back");
+        input.Hint = Lang.T("发消息到 {0}", "Message {0}", c.Title);
         bool group = Node.IsGroup(c.Id);
         perm.Visible = !group;
         perm.ForeColor = !group && node.GrantFor(c.Id) != null ? Theme.AccentText : Theme.Soft;
@@ -315,7 +325,7 @@ public class MainForm : Form {
         perm.Enabled = false;
         System.Threading.ThreadPool.QueueUserWorkItem(delegate { // asking the other PC may take seconds
             string key = null, problem = "";
-            try { key = node.FetchKey(p.Id); } catch (Exception e) { problem = e is InvalidOperationException ? e.Message : "连不上（" + e.Message + "）"; }
+            try { key = node.FetchKey(p.Id); } catch (Exception e) { problem = e is InvalidOperationException ? e.Message : Lang.T("连不上（{0}）", "can't connect ({0})", e.Message); }
             Ui(delegate {
                 perm.Enabled = true;
                 using (ControlForm f = new ControlForm(node, p, key, problem)) if (f.ShowDialog(this) == DialogResult.OK) RefreshList();
@@ -352,7 +362,7 @@ public class MainForm : Form {
         int x = av.Right + Theme.S(12), w = row.Right - x - Theme.S(mark ? 44 : 10);
         TextFormatFlags left = TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine;
         TextRenderer.DrawText(g, c.Title, mark ? Theme.Bold : Theme.Body, group ? new Rectangle(x, row.Y, w, row.Height) : new Rectangle(x, row.Y + Theme.S(7), w, Theme.S(23)), Theme.Text, left);
-        if (!group) TextRenderer.DrawText(g, (c.Online ? "在线" : "离线") + (grant == null ? "" : grant.Mode == "allow" ? " · 可控制本机" : " · 控制需确认"), Theme.Small, new Rectangle(x, row.Y + Theme.S(29), w, Theme.S(20)), grant != null ? Theme.AccentText : c.Online ? Theme.Online : Theme.Dim, left);
+        if (!group) TextRenderer.DrawText(g, (c.Online ? Lang.T("在线", "Online") : Lang.T("离线", "Offline")) + (grant == null ? "" : grant.Mode == "allow" ? Lang.T(" · 可控制本机", " · has access") : Lang.T(" · 控制需确认", " · asks first")), Theme.Small, new Rectangle(x, row.Y + Theme.S(29), w, Theme.S(20)), grant != null ? Theme.AccentText : c.Online ? Theme.Online : Theme.Dim, left);
         if (mark) {
             Rectangle r = new Rectangle(row.Right - Theme.S(38), row.Y + (row.Height - Theme.S(20)) / 2, Theme.S(28), Theme.S(20));
             Theme.Fill(g, r, r.Height, Theme.AccentDown, Color.Empty);
@@ -365,8 +375,8 @@ public class MainForm : Form {
         if (i < 0 || Node.IsGroup(((Conv)list.Items[i]).Id)) return;
         Conv c = (Conv)list.Items[i];
         ContextMenuStrip m = Theme.Menu();
-        m.Items.Add("移除这台电脑", null, delegate {
-            if (MessageBox.Show(this, "把“" + c.Title + "”从列表移除？还没送达的消息会取消，聊天记录保留在磁盘上。它再次上线时会重新出现。", "LanTalk", MessageBoxButtons.OKCancel) == DialogResult.OK) { node.ForgetPeer(c.Id); RefreshList(); Select(current); }
+        m.Items.Add(Lang.T("移除这台电脑", "Remove this PC"), null, delegate {
+            if (MessageBox.Show(this, Lang.T("把“{0}”从列表移除？还没送达的消息会取消，聊天记录保留在磁盘上。它再次上线时会重新出现。", "Remove \"{0}\" from the list? Messages not delivered yet are cancelled; the chat history stays on disk. It shows up again when it comes online.", c.Title), "LanTalk", MessageBoxButtons.OKCancel) == DialogResult.OK) { node.ForgetPeer(c.Id); RefreshList(); Select(current); }
         });
         m.Show(list, e.Location);
     }
@@ -377,14 +387,14 @@ public class MainForm : Form {
         if (m.From != node.Cfg.Id && m.Kind == "text") Notify(m);
         if (m.From != node.Cfg.Id && m.Kind == "run") { // visible, but not once per command
             DateTime last; toldControl.TryGetValue(m.From, out last);
-            if (tray.Visible && (DateTime.UtcNow - last).TotalMinutes > 10) tray.ShowBalloonTip(4000, m.FromName + " 正在控制这台电脑", Util.Cut(m.Text + " ", 120), ToolTipIcon.None);
+            if (tray.Visible && (DateTime.UtcNow - last).TotalMinutes > 10) tray.ShowBalloonTip(4000, Lang.T("{0} 正在控制这台电脑", "{0} is controlling this PC", m.FromName), Util.Cut(m.Text + " ", 120), ToolTipIcon.None);
             toldControl[m.From] = DateTime.UtcNow;
         }
     }
     void Notify(ChatMsg m) {
         if (Visible && ContainsFocus && m.Conv == current) return;
         if (!(Visible && m.Conv == current && Form.ActiveForm == this)) { int n; unread.TryGetValue(m.Conv, out n); unread[m.Conv] = n + 1; list.Invalidate(); }
-        if (tray.Visible) tray.ShowBalloonTip(4000, (string.IsNullOrEmpty(m.Agent) ? "" : m.Agent + " @ ") + m.FromName, m.Kind == "file" ? "[文件] " + m.Text : Util.Cut(m.Text + " ", 120), ToolTipIcon.None);
+        if (tray.Visible) tray.ShowBalloonTip(4000, (string.IsNullOrEmpty(m.Agent) ? "" : m.Agent + " @ ") + m.FromName, m.Kind == "file" ? Lang.T("[文件] ", "[File] ") + m.Text : Util.Cut(m.Text + " ", 120), ToolTipIcon.None);
         if (Visible) FlashWindow(Handle, true);
     }
     void Try(Action a) {
@@ -400,7 +410,7 @@ public class MainForm : Form {
     }
     void SendPaths(string[] paths) {
         Conv c = (Conv)list.SelectedItem;
-        if (paths.Length > 20 && MessageBox.Show(this, "要把 " + paths.Length + " 个项目发给“" + c.Title + "”吗？", "LanTalk", MessageBoxButtons.OKCancel) != DialogResult.OK) return;
+        if (paths.Length > 20 && MessageBox.Show(this, Lang.T("要把 {0} 个项目发给“{1}”吗？", "Send {0} items to \"{1}\"?", paths.Length, c.Title), "LanTalk", MessageBoxButtons.OKCancel) != DialogResult.OK) return;
         foreach (string p in paths) { string f = p; Try(delegate { node.SendPath(current, f); }); }
     }
     void InputKey(object s, KeyEventArgs e) {
@@ -411,7 +421,7 @@ public class MainForm : Form {
                 e.SuppressKeyPress = true;
                 Try(delegate {
                     string d = Path.Combine(dataDir, "pasted"); Directory.CreateDirectory(d);
-                    string f = Path.Combine(d, "截图 " + DateTime.Now.ToString("yyyyMMdd-HHmmss-fff") + ".png");
+                    string f = Path.Combine(d, Lang.T("截图 ", "Screenshot ") + DateTime.Now.ToString("yyyyMMdd-HHmmss-fff") + ".png");
                     using (Image i = Clipboard.GetImage()) i.Save(f, ImageFormat.Png);
                     node.SendPath(current, f);
                 });
@@ -420,32 +430,32 @@ public class MainForm : Form {
     }
     void Reveal(ChatMsg m) {
         if (m.Path != null && (File.Exists(m.Path) || Directory.Exists(m.Path))) Process.Start("explorer.exe", "/select,\"" + m.Path + "\"");
-        else if (m.State == "ok") MessageBox.Show(this, "文件已被移动或删除。", "LanTalk");
+        else if (m.State == "ok") MessageBox.Show(this, Lang.T("文件已被移动或删除。", "The file was moved or deleted."), "LanTalk");
     }
     void ShowMenu(ChatMsg m, Point at) {
         ContextMenuStrip c = Theme.Menu();
         if (m.Kind == "file") {
-            if (m.State == "ok" || m.From == node.Cfg.Id) { c.Items.Add("打开所在文件夹", null, delegate { Reveal(m); }); c.Items.Add("复制路径", null, delegate { if (!string.IsNullOrEmpty(m.Path)) Clipboard.SetText(m.Path); }); }
+            if (m.State == "ok" || m.From == node.Cfg.Id) { c.Items.Add(Lang.T("打开所在文件夹", "Open its folder"), null, delegate { Reveal(m); }); c.Items.Add(Lang.T("复制路径", "Copy path"), null, delegate { if (!string.IsNullOrEmpty(m.Path)) Clipboard.SetText(m.Path); }); }
         } else {
-            c.Items.Add("复制", null, delegate { if (!string.IsNullOrEmpty(m.Text)) Clipboard.SetText(m.Text); });
+            c.Items.Add(Lang.T("复制", "Copy"), null, delegate { if (!string.IsNullOrEmpty(m.Text)) Clipboard.SetText(m.Text); });
             Match u = m.Kind == "run" ? Match.Empty : Regex.Match(m.Text ?? "", "https?://[^\\s\"<>]+");
-            if (u.Success) c.Items.Add("打开链接", null, delegate { Process.Start(u.Value); });
+            if (u.Success) c.Items.Add(Lang.T("打开链接", "Open link"), null, delegate { Process.Start(u.Value); });
         }
-        if (m.Kind == "run" && m.State == "run") c.Items.Add("停止", null, delegate { node.StopControl(m.Id); });
-        if (m.From == node.Cfg.Id && m.Pending.Count > 0) c.Items.Add("取消发送", null, delegate { node.Cancel(m); });
-        if (m.From == node.Cfg.Id && (m.State == "fail" || m.State == "cancel")) c.Items.Add("重新发送", null, delegate { node.Retry(m); });
+        if (m.Kind == "run" && m.State == "run") c.Items.Add(Lang.T("停止", "Stop"), null, delegate { node.StopControl(m.Id); });
+        if (m.From == node.Cfg.Id && m.Pending.Count > 0) c.Items.Add(Lang.T("取消发送", "Cancel sending"), null, delegate { node.Cancel(m); });
+        if (m.From == node.Cfg.Id && (m.State == "fail" || m.State == "cancel")) c.Items.Add(Lang.T("重新发送", "Send again"), null, delegate { node.Retry(m); });
         if (c.Items.Count > 0) c.Show(view, at);
     }
 
     // ---- window ----
     public void ShowUp() { Show(); if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal; Activate(); MarkRead(); }
     void OpenSettings() {
-        using (SettingsForm f = new SettingsForm(node, false)) if (f.ShowDialog(this) == DialogResult.OK) { Text = "LanTalk · " + node.Cfg.Name; RefreshList(); }
+        using (SettingsForm f = new SettingsForm(node, false)) { if (f.ShowDialog(this) == DialogResult.OK) Text = "LanTalk · " + node.Cfg.Name; ApplyTexts(); RefreshList(); }
     }
     protected override void OnFormClosing(FormClosingEventArgs e) {
         if (!quitting && e.CloseReason == CloseReason.UserClosing) {
             e.Cancel = true; Hide();
-            if (!toldTray) { toldTray = true; tray.ShowBalloonTip(3000, "LanTalk", "仍在后台运行，点这里的图标可以打开，右键可以退出。", ToolTipIcon.None); }
+            if (!toldTray) { toldTray = true; tray.ShowBalloonTip(3000, "LanTalk", Lang.T("仍在后台运行，点这里的图标可以打开，右键可以退出。", "Still running. Click this icon to open it, right-click it to quit."), ToolTipIcon.None); }
             return;
         }
         tray.Visible = false;
@@ -460,39 +470,60 @@ public class SettingsForm : Form {
     readonly TextBox name = new TextBox(), code = new TextBox(), dir = new TextBox(), manual = new TextBox();
     readonly RCheck auto = new RCheck();
     readonly string oldCode;
+    readonly bool first;
+    string lang;
 
-    public SettingsForm(Node n, bool first) {
-        node = n; oldCode = n.Code;
-        Text = first ? "LanTalk 首次设置" : "LanTalk 设置"; Font = Theme.Body; BackColor = Theme.Back; ForeColor = Theme.Text; Icon = Theme.AppIcon();
+    public SettingsForm(Node n, bool firstRun) {
+        node = n; oldCode = n.Code; first = firstRun; lang = n.Cfg.Lang;
+        Font = Theme.Body; BackColor = Theme.Back; ForeColor = Theme.Text; Icon = Theme.AppIcon();
         FormBorderStyle = FormBorderStyle.FixedDialog; MaximizeBox = MinimizeBox = false; StartPosition = FormStartPosition.CenterScreen;
-        Label head = new Label(); head.Text = first ? "先设置一下这台电脑" : "设置"; head.Font = Theme.Greeting; head.TextAlign = ContentAlignment.MiddleLeft;
-        head.SetBounds(Theme.S(17), Theme.S(16), Theme.S(490), Theme.S(46)); Controls.Add(head);
+        name.Text = n.Cfg.Name; code.Text = oldCode ?? ""; dir.Text = n.Cfg.SaveDir; manual.Text = string.Join(", ", n.Cfg.Manual.ToArray());
+        using (RegistryKey k = Registry.CurrentUser.OpenSubKey(RunKey)) auto.Checked = k != null && k.GetValue("LanTalk") != null;
+        Build();
+        FormClosed += delegate { Lang.Set(node.Cfg.Lang); }; // a choice that wasn't saved is undone
+    }
+    // Lays the dialog out in the current language; the boxes keep what was typed.
+    void Build() {
+        SuspendLayout();
+        foreach (Control t in new Control[] { name, code, dir, manual, auto }) if (t.Parent != null) t.Parent.Controls.Remove(t);
+        foreach (Control c in Controls.Cast<Control>().ToArray()) { Controls.Remove(c); c.Dispose(); }
+        Text = first ? Lang.T("LanTalk 首次设置", "LanTalk setup") : Lang.T("LanTalk 设置", "LanTalk settings");
+        Label head = new Label(); head.Text = first ? Lang.T("先设置一下这台电脑", "Set up this PC") : Lang.T("设置", "Settings"); head.Font = Theme.Greeting; head.TextAlign = ContentAlignment.MiddleLeft;
+        head.SetBounds(Theme.S(17), Theme.S(16), Theme.S(270), Theme.S(46)); Controls.Add(head);
+        string[,] langs = { { "auto", Lang.T("跟随系统", "System") }, { "zh", "中文" }, { "en", "English" } };
+        int lx = Theme.S(514);
+        for (int i = 2; i >= 0; i--) {
+            string id = langs[i, 0];
+            RButton b = RButton.Outline(langs[i, 1]); b.Font = Theme.Small; b.AccessibleName = Lang.T("语言：", "Language: ") + langs[i, 1];
+            if (id == lang) { b.Fill = b.Hover = Theme.SideSel; b.Border = Theme.LineFocus; }
+            b.Size = new Size(b.FitWidth, Theme.S(30)); lx -= b.Width; b.Location = new Point(lx, Theme.S(25)); lx -= Theme.S(6);
+            b.Click += delegate { lang = id; Lang.Set(id); BeginInvoke((MethodInvoker)Build); }; // not now: Build disposes this button
+            Controls.Add(b);
+        }
         int y = Theme.S(76);
-        Row("本机名称（别的电脑看到的名字）", name, 490, ref y);
-        RButton gen = RButton.Outline("生成新的"), copy = RButton.Outline("复制");
-        Row("配对码（每台电脑必须相同）", code, 300, ref y);
+        Row(Lang.T("本机名称（别的电脑看到的名字）", "Name of this PC (what the others see)"), name, 490, ref y);
+        RButton gen = RButton.Outline(Lang.T("生成新的", "New code")), copy = RButton.Outline(Lang.T("复制", "Copy"));
+        Row(Lang.T("配对码（每台电脑必须相同）", "Pairing code (the same on every PC)"), code, 300, ref y);
         Control box = code.Parent;
         gen.SetBounds(box.Right + Theme.S(8), box.Top, Theme.S(104), box.Height); copy.SetBounds(gen.Right + Theme.S(8), box.Top, Theme.S(70), box.Height);
         gen.Click += delegate { code.Text = Crypto.NewCode(); };
         copy.Click += delegate { if (code.Text.Length > 0) Clipboard.SetText(code.Text); };
         Controls.Add(gen); Controls.Add(copy);
-        Label tip = new Label(); tip.Text = "第一台点“生成新的”，其余的填同一个配对码。配对码等于钥匙，不要外传。"; tip.ForeColor = Theme.Dim; tip.Font = Theme.Small;
+        Label tip = new Label(); tip.Text = Lang.T("第一台点“生成新的”，其余的填同一个配对码。配对码等于钥匙，不要外传。", "First PC: New code. Other PCs: enter the same one. It is a key, so keep it private."); tip.ForeColor = Theme.Dim; tip.Font = Theme.Small;
         y -= Theme.S(8); tip.SetBounds(Theme.S(21), y, Theme.S(490), Theme.S(24)); Controls.Add(tip); y += Theme.S(36);
-        Row("收到的文件存到", dir, 490, ref y);
-        Row("手动添加电脑 IP（自动找不到时才填，逗号分隔）", manual, 490, ref y);
-        Label fp = new Label(); fp.Text = "本机校验码（别的电脑给本机控制权限时核对）：" + Node.Fingerprint(n.PublicKey); fp.ForeColor = Theme.Dim; fp.Font = Theme.Small;
+        Row(Lang.T("收到的文件存到", "Received files go to"), dir, 490, ref y);
+        Row(Lang.T("手动添加电脑 IP（自动找不到时才填，逗号分隔）", "IPs of PCs that don't show up by themselves (comma-separated)"), manual, 490, ref y);
+        Label fp = new Label(); fp.Text = Lang.T("本机校验码（别的电脑给本机控制权限时核对）：", "Check code of this PC (for control access): ") + Node.Fingerprint(node.PublicKey); fp.ForeColor = Theme.Dim; fp.Font = Theme.Small;
         fp.SetBounds(Theme.S(21), y - Theme.S(4), Theme.S(500), Theme.S(24)); Controls.Add(fp); y += Theme.S(26);
-        auto.Text = "开机自动启动（缩到托盘）"; auto.SetBounds(Theme.S(22), y, Theme.S(400), Theme.S(30)); Controls.Add(auto);
+        auto.Text = Lang.T("开机自动启动（缩到托盘）", "Start with Windows (in the tray)"); auto.SetBounds(Theme.S(22), y, Theme.S(400), Theme.S(30)); Controls.Add(auto);
         y += Theme.S(46);
-        RButton ok = RButton.Primary("确定"), cancel = RButton.Outline("取消");
+        RButton ok = RButton.Primary(Lang.T("确定", "OK")), cancel = RButton.Outline(Lang.T("取消", "Cancel"));
         cancel.DialogResult = DialogResult.Cancel;
         cancel.SetBounds(Theme.S(314), y, Theme.S(96), Theme.S(38)); ok.SetBounds(Theme.S(418), y, Theme.S(96), Theme.S(38));
         ok.Click += delegate { Save(); };
         Controls.Add(cancel); Controls.Add(ok); AcceptButton = ok; CancelButton = cancel;
         ClientSize = new Size(Theme.S(538), ok.Bottom + Theme.S(22));
-
-        name.Text = n.Cfg.Name; code.Text = oldCode ?? ""; dir.Text = n.Cfg.SaveDir; manual.Text = string.Join(", ", n.Cfg.Manual.ToArray());
-        using (RegistryKey k = Registry.CurrentUser.OpenSubKey(RunKey)) auto.Checked = k != null && k.GetValue("LanTalk") != null;
+        ResumeLayout();
     }
     protected override void OnHandleCreated(EventArgs e) { base.OnHandleCreated(e); Theme.Chrome(this, Theme.Back); }
     void Row(string text, TextBox box, int width, ref int y) {
@@ -507,11 +538,11 @@ public class SettingsForm : Form {
     void Save() {
         string c = Crypto.NormalizeCode(code.Text), nm = name.Text.Trim(), d = dir.Text.Trim();
         string[] ips = manual.Text.Split(new char[] { ',', '，', ' ', ';' }, StringSplitOptions.RemoveEmptyEntries);
-        string err = nm.Length == 0 ? "请填写本机名称。" : nm.Length > 40 ? "名称太长。" : c == null ? "配对码应是 16 位（不含 I、O、0、1），例如 ABCD-EFGH-JKLM-NPQR。" : null;
-        if (err == null && ips.Any(delegate (string s) { return Node.ParseEndpoint(s) == null; })) err = "IP 地址格式不对，例如 192.168.1.20。";
-        if (err == null) try { if (!Path.IsPathRooted(d)) throw new ArgumentException("请填写完整的文件夹路径。"); Directory.CreateDirectory(d); } catch (Exception e) { err = "接收文件夹不能用：" + e.Message; }
+        string err = nm.Length == 0 ? Lang.T("请填写本机名称。", "Enter a name for this PC.") : nm.Length > 40 ? Lang.T("名称太长。", "The name is too long.") : c == null ? Lang.T("配对码应是 16 位（不含 I、O、0、1），例如 ABCD-EFGH-JKLM-NPQR。", "A pairing code has 16 characters (no I, O, 0 or 1), like ABCD-EFGH-JKLM-NPQR.") : null;
+        if (err == null && ips.Any(delegate (string s) { return Node.ParseEndpoint(s) == null; })) err = Lang.T("IP 地址格式不对，例如 192.168.1.20。", "That is not an IP address. Example: 192.168.1.20.");
+        if (err == null) try { if (!Path.IsPathRooted(d)) throw new ArgumentException(Lang.T("请填写完整的文件夹路径。", "Enter the complete folder path.")); Directory.CreateDirectory(d); } catch (Exception e) { err = Lang.T("接收文件夹不能用：", "The folder for received files can't be used: ") + e.Message; }
         if (err != null) { MessageBox.Show(this, err, "LanTalk"); return; }
-        lock (node.L) { node.Cfg.Name = nm; node.Cfg.SaveDir = d; node.Cfg.Manual = ips.ToList(); }
+        lock (node.L) { node.Cfg.Name = nm; node.Cfg.SaveDir = d; node.Cfg.Manual = ips.ToList(); node.Cfg.Lang = lang; }
         if (c != oldCode) { node.ClearGrants(); node.SetCode(c); } else node.SaveConfig(); // a new code means a new circle of PCs
         using (RegistryKey k = Registry.CurrentUser.CreateSubKey(RunKey)) {
             if (auto.Checked) k.SetValue("LanTalk", "\"" + Application.ExecutablePath + "\" --tray");
@@ -542,12 +573,13 @@ public static class Program {
         using (EventWaitHandle show = new EventWaitHandle(false, EventResetMode.AutoReset, "Local\\" + key + "-show")) {
             if (!created) { show.Set(); return 0; } // already running: bring it up
             Node node = new Node(data, bind);
+            Lang.Set(node.Cfg.Lang);
             if (node.Code == null) {
                 using (SettingsForm f = new SettingsForm(node, true)) { f.ShowInTaskbar = true; if (f.ShowDialog() != DialogResult.OK) return 0; }
                 trayOnly = false;
             }
             try { node.Start(); }
-            catch (SocketException e) { MessageBox.Show("端口 " + node.Cfg.Port + " 无法使用：" + e.Message, "LanTalk"); return 2; }
+            catch (SocketException e) { MessageBox.Show(Lang.T("端口 {0} 无法使用：{1}", "Port {0} can't be used: {1}", node.Cfg.Port, e.Message), "LanTalk"); return 2; }
             new IpcServer(node, data).Start();
             MainForm form = new MainForm(node, data);
             form.ShowTray();

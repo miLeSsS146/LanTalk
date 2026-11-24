@@ -71,7 +71,7 @@ public class IpcServer {
             string cmd = Util.Str(q, "cmd");
             if (cmd == "run" || cmd == "put" || cmd == "get") {
                 string to = Target(Util.Str(q, "to"));
-                if (Node.IsGroup(to)) throw new InvalidOperationException("要用 --to 指明一台电脑");
+                if (Node.IsGroup(to)) throw Lang.Err("要用 --to 指明一台电脑", "name one PC with --to");
                 Dictionary<string, object> req = new Dictionary<string, object>(); req["op"] = cmd;
                 foreach (string k in new string[] { "cmd", "cwd", "path", "timeout", "force" }) if (q.ContainsKey("r_" + k)) req[k] = q["r_" + k];
                 node.Control(to, req, Agent(q), Util.Str(q, "local"), delegate (object o) { Ipc.WriteAll(p, Util.ToJson(o)); });
@@ -94,14 +94,14 @@ public class IpcServer {
             case "file": return Result(node.SendPath(Target(Util.Str(q, "to")), Util.Str(q, "path"), Agent(q)));
             case "status":
                 ChatMsg s = node.Get(Util.Str(q, "id"));
-                if (s == null) throw new InvalidOperationException("没有这条消息");
+                if (s == null) throw Lang.Err("没有这条消息", "no such message");
                 return Result(s);
             case "read":
                 int n = (int)Util.Num(q, "n");
                 return new { ok = true, more = 0, messages = node.History(Target(Util.Str(q, "to")), n <= 0 ? 20 : Math.Min(n, 500)).Select(View).ToArray() };
             case "inbox": return Inbox(Util.Str(q, "reader"), Util.Flag(q, "peek"));
         }
-        throw new InvalidOperationException("未知命令");
+        throw Lang.Err("未知命令", "unknown command");
     }
     static string Agent(Dictionary<string, object> q) { string a = Util.Str(q, "agent").Trim(); return a.Length == 0 ? "Claude" : Util.Cut(a, 20); }
 
@@ -109,14 +109,14 @@ public class IpcServer {
         if (to == "" || to == Node.Ai) return Node.Ai;
         if (to == Node.All) return Node.All;
         List<Peer> hit = node.Peers().Where(delegate (Peer p) { return p.Id == to || string.Equals(p.Name, to, StringComparison.OrdinalIgnoreCase); }).ToList();
-        if (hit.Count == 0) throw new InvalidOperationException("没有叫“" + to + "”的电脑，用 lt list 查看");
-        if (hit.Count > 1) throw new InvalidOperationException("有几台电脑都叫“" + to + "”，请改用 lt list 里的 id");
+        if (hit.Count == 0) throw Lang.Err("没有叫“{0}”的电脑，用 lt list 查看", "no PC called \"{0}\", see lt list", to);
+        if (hit.Count > 1) throw Lang.Err("有几台电脑都叫“{0}”，请改用 lt list 里的 id", "several PCs are called \"{0}\", use the id from lt list", to);
         return hit[0].Id;
     }
     object Result(ChatMsg m) {
         string[] waiting;
         lock (node.L) waiting = m.Pending.Select(delegate (string id) { Peer p = node.Find(id); return p == null ? id : p.Name; }).ToArray();
-        return new { ok = true, id = m.Id, state = m.State, waiting = waiting, error = m.Error ?? "" };
+        return new { ok = true, id = m.Id, state = m.State, waiting = waiting, error = m.ErrText };
     }
     object View(ChatMsg m) {
         return new { id = m.Id, time = m.LocalTime.ToString("yyyy-MM-dd HH:mm:ss"), from = m.FromName, agent = m.Agent ?? "", mine = m.From == node.Cfg.Id,
