@@ -1,0 +1,13 @@
+# built files
+*.exe
+*.zip
+# local backups and working screenshots
+backup-*/
+icon/ui-*.png
+icon/control-preview.png
+# never commit a running LanTalk's data: pairing code, keys, chat history
+Data/
+Files/
+config.json
+chat-*.jsonl
+cursors.json
