@@ -1,124 +1,124 @@
-<p align="center"><img src="icon/LanTalk.svg" width="112" alt="LanTalk 图标"></p>
+<p align="center"><img src="icon/LanTalk.svg" width="112" alt="LanTalk icon"></p>
 
 <h1 align="center">LanTalk</h1>
 
-<p align="center">让局域网里的几台 Windows 电脑互相聊天、传文件，<br>也让每台电脑上的 Claude Code 能彼此沟通、到对方那台上干活。</p>
+<p align="center">Chat and send files between the Windows PCs on your local network,<br>and let the Claude Code on each one talk to the others and get work done over there.</p>
 
-<p align="center"><b>简体中文</b> · <a href="README.en.md">English</a></p>
+<p align="center"><b>English</b> · <a href="README.zh-CN.md">简体中文</a></p>
 
-![主窗口：几台电脑上的 Claude 在协作频道里交流](docs/main.png)
+![Main window: Claude on several PCs talking in the Claude channel](docs/en/main.png)
 
-## 它解决什么问题
+## What it is for
 
-你有几台电脑，每台上都开着 Claude Code。它们各干各的，不知道对方在改哪个文件，也没法去另一台上跑个测试，只能靠你来回搬运。
+You have a few PCs with Claude Code running on each. They work side by side without knowing which files the other is changing, and none of them can run a test on another machine, so you carry everything back and forth.
 
-LanTalk 给它们一条直通的线路，你也在同一个窗口里看着。消息、文件、每一条远程命令都摆在聊天记录里，随时能插话或叫停。
+LanTalk gives them a direct line, and you watch in the same window. Messages, files and every remote command are in the chat history. You can step in or stop things at any time.
 
-没有服务器，没有账号，数据只在你的局域网里走。
+No server, no account. Data stays on your local network.
 
-## 能做什么
+## What it does
 
-- **聊天和传文件**：文字、图片、文件、整个文件夹，拖进窗口就发。对方不在线会排队，上线后自动送达。
-- **Claude 协作频道**：命令行 `lt` 让 Claude Code 收发消息和文件，你在窗口里看得到，也能发言。
-- **远程控制**（默认关闭）：授权之后，一台电脑上的 Claude 可以在另一台上运行 PowerShell 命令、读写文件。
-- **中英双语**：在设置里切换，立即生效。语言不同的电脑之间也能正常配合。
-- **零依赖**：C# 写成，用 Windows 自带的编译器就能编译，不用装 SDK，不用联网下载任何包。
+- **Chat and files**: text, pictures, files and whole folders. Drop them on the window. If a PC is offline, they wait and go out when it is back.
+- **Claude channel**: the command line `lt` lets Claude Code send and receive messages and files. You see all of it and can join in.
+- **Remote control** (off by default): once you allow it, Claude on one PC can run PowerShell commands and read or write files on another.
+- **English and Chinese**: switch in Settings, no restart. PCs with different languages work together.
+- **No dependencies**: written in C# and built with the compiler that ships with Windows. No SDK to install, no packages to download.
 
-## 快速开始
+## Quick start
 
-需要 Windows 10 / 11（.NET Framework 4.7.2 以上，系统自带）。
+Needs Windows 10 or 11 (.NET Framework 4.7.2 or later, which is part of Windows).
 
-1. 从 [Releases](https://github.com/miLeSsS146/LanTalk/releases/latest) 下载 zip 并解压。想自己编译的话，下载源码双击 `build.cmd`，几秒后得到 `LanTalk.exe` 和 `lt.exe`。
-2. 把这两个文件放到每台电脑的 `D:\LanTalk`（没有 D 盘也可以放别处，数据会存到用户目录）。
-3. 运行 `LanTalk.exe`。第一台点“生成新的”得到配对码，其他电脑填同一个。
-4. Windows 防火墙弹窗时，只勾选“专用网络”并允许。程序没有代码签名，SmartScreen 可能会拦一下，点“更多信息 → 仍要运行”；不放心就自己编译。
+1. Download the zip from [Releases](https://github.com/miLeSsS146/LanTalk/releases/latest) and unpack it. To build it yourself, download the source and double-click `build.cmd`; a few seconds later you have `LanTalk.exe` and `lt.exe`.
+2. Put both in `D:\LanTalk` on every PC. Without a D: drive, put them anywhere; data goes to your user folder.
+3. Run `LanTalk.exe`. On the first PC click **New code**, and enter that pairing code on the others.
+4. When Windows Firewall asks, tick only **Private networks** and allow. The programs are not code-signed, so SmartScreen may step in: More info → Run anyway, or build them yourself.
 
-几秒后左侧会出现其他电脑。更多用法见 [使用说明](使用说明.md)。
+The other PCs show up on the left within seconds. If they don't, check that all PCs are on the same router, that the network type is Private, and that TCP and UDP port 47820 are open. You can also enter IP addresses in Settings.
 
-## 让 Claude Code 用起来
+## Using it with Claude Code
 
-把 [CLAUDE协作片段.md](CLAUDE协作片段.md) 的内容加进每台电脑的 `%USERPROFILE%\.claude\CLAUDE.md`，新开的会话就会用了。
+Add [CLAUDE-snippet.en.md](CLAUDE-snippet.en.md) to `%USERPROFILE%\.claude\CLAUDE.md` on every PC. New sessions will know what to do.
 
 ```bash
-lt.exe list                                   # 有哪些电脑、谁在线
-lt.exe send "接口改完了，可以联调"              # 发到 Claude 协作频道
-lt.exe file --to 笔记本 D:\logs\test.zip       # 传文件
-lt.exe wait --timeout 600                     # 等新消息
+lt.exe list                                   # which PCs there are, who is online
+lt.exe send "API is done, ready to test"      # to the Claude channel
+lt.exe file --to Laptop D:\logs\test.zip      # send a file
+lt.exe wait --timeout 600                     # wait for a message
 ```
 
-`lt` 是普通命令行程序，其他能执行命令的 AI 工具或脚本同样可以用。
+`lt` is an ordinary command line program, so other AI tools and scripts can use it too.
 
-## 远程控制
+## Remote control
 
 ```bash
-lt.exe run --to 客厅主机 --cwd 'D:\项目' --timeout 600 - <<'EOF'
+lt.exe run --to Den --cwd 'D:\project' --timeout 600 - <<'EOF'
 git pull
 npm test
 EOF
 
-lt.exe put --to 客厅主机 fix.patch 'D:\项目\fix.patch'
-lt.exe get --to 客厅主机 'D:\项目\report.html' report.html
+lt.exe put --to Den fix.patch 'D:\project\fix.patch'
+lt.exe get --to Den 'D:\project\report.html' report.html
 ```
 
-输出实时传回，退出码原样返回。命令以对方当前的 Windows 账户、在对方的桌面会话里运行，没有管理员权限。
+Output comes back live and the exit code is passed on. Commands run as the Windows account signed in there, in its desktop session, without administrator rights.
 
-![权限窗口和确认窗口](docs/permission.png)
+![The access window and the approval window](docs/en/permission.png)
 
-- **默认拒绝**：要由人在被控制的那台电脑上打开，可选“每次询问”或“直接允许”。权限是单向的。
-- **认机器，不只认配对码**：每台电脑有自己的签名密钥，每个请求都对一次性随机数签名，授权时要核对校验码。
-- **看得见**：每条命令都出现在两台电脑的聊天里。
-- **停得下**：右键停止、断线、超时、收回权限，都会停掉命令和它启动的子程序。
+- **Refused by default**: a person has to turn it on at the controlled PC, as "Ask every time" or "Always allow". It works in one direction only.
+- **Tied to the machine, not just the pairing code**: every PC has its own signing key, every request is signed over a one-time challenge, and you compare a check code when allowing.
+- **Visible**: every command appears in the chat on both PCs.
+- **Stoppable**: right-clicking Stop, losing the connection, a timeout or removing access all end the command and what it started.
 
-![聊天记录里的远程命令](docs/control.png)
+![Remote commands in the chat](docs/en/control.png)
 
-## 安全说明
+## Security
 
-请在装之前读完这一节。这个项目**没有经过专业的安全审计**，只适合放在你自己信任的家庭或办公局域网里，不要暴露到公网。
+Please read this before installing. The project **has not been audited**. Use it only on a home or office network you trust, and don't expose it to the internet.
 
-| 部分 | 做法 |
+| Part | How |
 |---|---|
-| 配对 | 16 位配对码（80 位随机），PBKDF2-SHA256 十万次派生密钥 |
-| 传输 | AES-256-CBC + HMAC-SHA256，先加密后认证；双方随机数派生每次连接的密钥，录下的流量不能重放 |
-| 远程控制 | ECDSA P-256 签名，绑定授权时的公钥 |
-| 本机存储 | 配对码和私钥用 Windows 账户加密（DPAPI）保存 |
+| Pairing | 16-character pairing code (80 random bits), key derived with 100,000 rounds of PBKDF2-SHA256 |
+| Transport | AES-256-CBC + HMAC-SHA256, encrypt-then-MAC; both sides contribute randomness to the keys of each connection, so recorded traffic can't be replayed |
+| Remote control | ECDSA P-256 signatures, tied to the public key you allowed |
+| On disk | Pairing code and private key are encrypted for the Windows account (DPAPI) |
 
-已知的不足：
+Known weaknesses:
 
-- **没有前向保密**。有人录下流量、之后又拿到配对码，就能解开旧内容。怀疑泄露就换配对码，换码会清空所有控制权限。
-- **有配对码就等于被信任**，能给你发消息、把文件存进接收目录，接入同一局域网时也可能看到通信内容。
-- **发现广播没有加密**，同一局域网里的人能看到电脑名（但改不了）。
-- **聊天记录是明文**，存在 `Data` 文件夹里。
-- **“直接允许”等于交出这台电脑**：对方失守，这台也就失守。而且对方电脑上以那个账户运行的任何程序，都可以调用 `lt`。
-- **AI 会犯错，也可能被网页或文件里的内容误导**。拿不准就用“每次询问”，并留好备份。
+- **No forward secrecy.** Someone who records traffic and later gets the pairing code can read it. If in doubt, change the code; that also removes all control access.
+- **Whoever has the pairing code is trusted.** They can message you, put files in your receive folder and, on the same network, may be able to see what is sent.
+- **Discovery broadcasts are not encrypted.** People on the same network can see PC names, but not change them.
+- **Chat history is plain text** in the `Data` folder.
+- **"Always allow" hands over that PC.** If the other PC is compromised, so is this one. Any program running under that account over there can call `lt`.
+- **AI makes mistakes** and can be misled by what is in a web page or file. When unsure, use "Ask every time", and keep backups.
 
-发现安全问题，请用 GitHub 的 Security → Report a vulnerability 私下告知，不要直接发 Issue。
+Found a security problem? Please use Security → Report a vulnerability on GitHub rather than a public issue.
 
-## 已知限制
+## Limits
 
-- 大文件断线后从头重传，没有断点续传。
-- 完整路径超过约 260 个字符的文件会失败；空文件夹不会传过去；一次最多 20000 个文件。
-- `lt` 只能在运行 LanTalk 的桌面会话里用，不能经 SSH 调用。
-- 远程控制只有命令和文件，看不到对方屏幕，也不能操作鼠标键盘。
-- 默认数据目录是 `D:\LanTalk`。
+- A large file starts over after a lost connection.
+- Paths over about 260 characters fail, empty folders are not sent, and one transfer holds at most 20,000 files.
+- `lt` works only in the desktop session that runs LanTalk, not over SSH.
+- Remote control means commands and files. It can't see the screen or use the mouse and keyboard.
+- The default data folder is `D:\LanTalk`.
 
-## 代码结构
+## Code
 
-| 文件 | 内容 |
+| File | What is in it |
 |---|---|
-| `Core.cs` | 发现、加密通道、消息队列、收发文件、历史记录 |
-| `Control.cs` | 远程控制：身份、授权、执行命令、读写文件 |
-| `Lang.cs` | 语言。每条文字都在用到的地方中英成对写着 |
-| `Ipc.cs` / `Cli.cs` | 程序与 `lt.exe` 之间的本机管道 / 命令行 |
-| `Look.cs` / `Ui.cs` / `ControlUi.cs` | 配色与自绘控件 / 主窗口与设置 / 权限与确认窗口 |
-| `icon/make-icon.py` | 生成图标（需要 Pillow，编译时不需要） |
-| `update/` | 一键更新脚本；把编译好的两个 exe 放进去，拷到目标电脑双击 `update.cmd` |
+| `Core.cs` | Discovery, encrypted channel, message queue, files, history |
+| `Control.cs` | Remote control: identity, access, running commands, files |
+| `Lang.cs` | Languages. Each text is a Chinese/English pair where it is used |
+| `Ipc.cs` / `Cli.cs` | Local pipe between the app and `lt.exe` / command line |
+| `Look.cs` / `Ui.cs` / `ControlUi.cs` | Colours and controls / main window and settings / access and approval windows |
+| `icon/make-icon.py` | Draws the icon (needs Pillow; not needed to build) |
+| `update/` | Update script: put both built programs in it, copy it to a PC and double-click `update.cmd` |
 
-跑测试：双击 `tests\run-tests.cmd`。93 项，只走本机回环，用临时目录，不碰真实数据。
+Tests: double-click `tests\run-tests.cmd`. 93 of them, over loopback and in a temporary folder; your data is not touched.
 
-## 声明
+## Disclaimer
 
-LanTalk 是个人项目，与 Anthropic 没有从属或合作关系，也未获其认可。Claude 是 Anthropic 的商标。代码在 Claude Code 协助下完成。
+LanTalk is a personal project. It is not affiliated with or endorsed by Anthropic. Claude is a trademark of Anthropic. Written with the help of Claude Code.
 
-## 许可
+## License
 
 [MIT](LICENSE)
