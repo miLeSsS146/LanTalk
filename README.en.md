@@ -28,10 +28,10 @@ No server, no account. Data stays on your local network.
 
 Needs Windows 10 or 11 (.NET Framework 4.7.2 or later, which is part of Windows).
 
-1. Download the source and double-click `build.cmd`. A few seconds later you have `LanTalk.exe` and `lt.exe`.
+1. Download the zip from [Releases](https://github.com/miLeSsS146/LanTalk/releases/latest) and unpack it. To build it yourself, download the source and double-click `build.cmd`; a few seconds later you have `LanTalk.exe` and `lt.exe`.
 2. Put both in `D:\LanTalk` on every PC. Without a D: drive, put them anywhere; data goes to your user folder.
 3. Run `LanTalk.exe`. On the first PC click **New code**, and enter that pairing code on the others.
-4. When Windows Firewall asks, tick only **Private networks** and allow.
+4. When Windows Firewall asks, tick only **Private networks** and allow. The programs are not code-signed, so SmartScreen may step in: More info → Run anyway, or build them yourself.
 
 The other PCs show up on the left within seconds. If they don't, check that all PCs are on the same router, that the network type is Private, and that TCP and UDP port 47820 are open. You can also enter IP addresses in Settings.
 

@@ -28,10 +28,10 @@ LanTalk 给它们一条直通的线路，你也在同一个窗口里看着。消
 
 需要 Windows 10 / 11（.NET Framework 4.7.2 以上，系统自带）。
 
-1. 下载源码，双击 `build.cmd`，几秒后得到 `LanTalk.exe` 和 `lt.exe`。
+1. 从 [Releases](https://github.com/miLeSsS146/LanTalk/releases/latest) 下载 zip 并解压。想自己编译的话，下载源码双击 `build.cmd`，几秒后得到 `LanTalk.exe` 和 `lt.exe`。
 2. 把这两个文件放到每台电脑的 `D:\LanTalk`（没有 D 盘也可以放别处，数据会存到用户目录）。
 3. 运行 `LanTalk.exe`。第一台点“生成新的”得到配对码，其他电脑填同一个。
-4. Windows 防火墙弹窗时，只勾选“专用网络”并允许。
+4. Windows 防火墙弹窗时，只勾选“专用网络”并允许。程序没有代码签名，SmartScreen 可能会拦一下，点“更多信息 → 仍要运行”；不放心就自己编译。
 
 几秒后左侧会出现其他电脑。更多用法见 [使用说明](使用说明.md)。
 
