@@ -8,6 +8,7 @@ using System.Linq;
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -17,7 +18,7 @@ using System.Web.Script.Serialization;
 namespace LanTalk {
 
 public class Peer {
-    public string Id, Name, Ip;
+    public string Id, Name, Ip, Device, Ver, Build; // Ver, Build: of its LanTalk, null for older ones   Device: see class Device; null while the other PC runs a version without it
     public int Port;
     [ScriptIgnore] public DateTime LastSeen;
     [ScriptIgnore] public DateTime RetryAfter;
@@ -25,7 +26,7 @@ public class Peer {
 }
 
 public class ChatMsg {
-    public string Id, Conv, From, FromName, Agent, Kind, Text, Path, State, Error, ErrorEn; // Kind: text|file|run  State: queued|sending|ok|recv|fail|cancel, run while a remote command runs
+    public string Id, Conv, From, FromName, Agent, Kind, Text, Path, State, Error, ErrorEn, Op; // Op: what a run entry did, see CapOf; null in older entries   Kind: text|file|run  State: queued|sending|ok|recv|fail|cancel, run while a remote command runs
     public long Time, Size, Seq;   // Seq: local arrival order, the CLI inbox cursor
     public List<string> Pending = new List<string>();  // peers that don't have it yet (own messages only)
     public void Err(Msg m) { Error = m == null ? null : m.Zh; ErrorEn = m == null ? null : m.En; }
@@ -36,7 +37,7 @@ public class ChatMsg {
 }
 
 public class Settings {
-    public string Id, Name, CodeProtected, KeyProtected, SaveDir, Lang; // Lang: zh | en | auto
+    public string Id, Name, CodeProtected, KeyProtected, SaveDir, Lang, Device; // Lang: zh | en | auto  Device: a kind, empty = detect
     public int Port;
     public List<string> Manual = new List<string>();  // "ip" or "ip:port"
     public List<Peer> Peers = new List<Peer>();
@@ -59,6 +60,11 @@ public static class Util {
         if (n < 1024 * 1024) return (n / 1024.0).ToString("0.0") + " KB";
         if (n < 1024L * 1024 * 1024) return (n / 1048576.0).ToString("0.0") + " MB";
         return (n / 1073741824.0).ToString("0.00") + " GB";
+    }
+
+    // Virus scanners, editors and the like hold a file for a moment.
+    public static void Replace(string from, string to) {
+        for (int i = 0; ; i++) try { File.Replace(from, to, null); return; } catch (IOException) { if (i >= 10 || !File.Exists(from) || !File.Exists(to)) throw; Thread.Sleep(300); }
     }
 
     static readonly Regex Reserved = new Regex("^(CON|PRN|AUX|NUL|CONIN\\$|CONOUT\\$|COM[0-9]|LPT[0-9])(\\..*)?$", RegexOptions.IgnoreCase);
@@ -91,6 +97,35 @@ public static class Util {
             string t = Path.Combine(dir, name + " (" + i + ")" + ext);
             if (!File.Exists(t) && !Directory.Exists(t)) return t;
         }
+    }
+}
+
+// What kind of PC this is. Decides the icon the other PCs show for it.
+public static class Device {
+    public static readonly string[] Kinds = { "tower", "mini", "laptop" };
+    public static string Clean(string s) { return Array.IndexOf(Kinds, s) >= 0 ? s : null; }
+    static string detected;
+    public static string Detected { get { return detected ?? (detected = FromChassis(Chassis(Firmware()))); } }
+
+    [DllImport("kernel32.dll")] static extern int GetSystemFirmwareTable(uint provider, uint table, byte[] buffer, int size);
+    static byte[] Firmware() {
+        int n = GetSystemFirmwareTable(0x52534D42, 0, null, 0); // "RSMB"
+        byte[] b = new byte[Math.Max(0, n)];
+        return n > 0 && GetSystemFirmwareTable(0x52534D42, 0, b, n) == n ? b : new byte[0];
+    }
+    // SMBIOS: each structure is type, length, data, then strings up to a double zero. Type 3 is the enclosure.
+    public static int Chassis(byte[] b) {
+        for (int i = 8; i + 5 < b.Length && b[i + 1] >= 4; i += 2) {
+            if (b[i] == 3) return b[i + 5] & 0x7F;
+            i += b[i + 1];
+            while (i + 1 < b.Length && (b[i] != 0 || b[i + 1] != 0)) i++;
+        }
+        return 0;
+    }
+    // Home-built PCs nearly all report "desktop" whatever their size, so a small case usually has to be chosen by hand.
+    public static string FromChassis(int c) {
+        if (c >= 8 && c <= 11 || c == 14 || c >= 30 && c <= 32) return "laptop";
+        return c == 4 || c == 15 || c == 16 || c == 35 || c == 36 ? "mini" : "tower"; // low profile, space-saving, lunch box, mini PC, stick PC
     }
 }
 
@@ -146,7 +181,11 @@ public class Channel : IDisposable {
     long sendSeq, recvSeq;
     readonly Aes aes = new AesCryptoServiceProvider(), aesIn = new AesCryptoServiceProvider(); // one each way: remote control sends and receives at once
 
-    Channel(TcpClient c) { tcp = c; c.NoDelay = true; ns = c.GetStream(); ns.ReadTimeout = 10000; ns.WriteTimeout = 30000; }
+    [DllImport("kernel32.dll")] static extern bool SetHandleInformation(IntPtr h, int mask, int flags);
+    // .NET lets child processes inherit sockets: a program left running would keep the port, and LanTalk couldn't start again.
+    public void KeepAlive() { tcp.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.KeepAlive, true); }
+    public static void Keep(Socket s) { SetHandleInformation(s.Handle, 1, 0); }
+    Channel(TcpClient c) { tcp = c; Keep(c.Client); c.NoDelay = true; ns = c.GetStream(); ns.ReadTimeout = 10000; ns.WriteTimeout = 30000; }
 
     public static Channel Connect(string ip, int port, byte[] master) {
         TcpClient c = new TcpClient(AddressFamily.InterNetwork);
@@ -228,7 +267,7 @@ public partial class Node : IDisposable {
     readonly IPAddress bind;
     readonly Dictionary<string, List<ChatMsg>> history = new Dictionary<string, List<ChatMsg>>();
     readonly HashSet<string> busy = new HashSet<string>();
-    readonly Semaphore slots = new Semaphore(64, 64);
+    readonly Semaphore slots = new Semaphore(128, 128);
     readonly AutoResetEvent pumpSignal = new AutoResetEvent(false);
     byte[] master, discKey;
     UdpClient udp;
@@ -248,9 +287,14 @@ public partial class Node : IDisposable {
         if (Cfg.Port <= 0) Cfg.Port = DefaultPort;
         if (string.IsNullOrEmpty(Cfg.SaveDir)) Cfg.SaveDir = Ipc.DefaultSave;
         Cfg.Peers.RemoveAll(delegate (Peer p) { return !Util.IsId(p.Id); });
+        Cfg.Device = LanTalk.Device.Clean(Cfg.Device);
+        foreach (Peer p in Cfg.Peers) p.Device = LanTalk.Device.Clean(p.Device);
         if (Cfg.Control == null) Cfg.Control = new List<Grant>();
-        Cfg.Control.RemoveAll(delegate (Grant g) { return !Util.IsId(g.Id) || string.IsNullOrEmpty(g.Key); });
+        foreach (Grant g in Cfg.Control) g.Tidy();
+        Cfg.Control.RemoveAll(delegate (Grant g) { return !Util.IsId(g.Id) || string.IsNullOrEmpty(g.Key) || !g.Any; });
     }
+
+    public string Device { get { return Cfg.Device ?? LanTalk.Device.Detected; } }
 
     public static bool IsGroup(string conv) { return conv == All || conv == Ai; }
 
@@ -276,14 +320,22 @@ public partial class Node : IDisposable {
         SetCode(code);
         LoadKey();
         LoadHistory();
+        CleanJobs();
         Directory.CreateDirectory(Cfg.SaveDir);
         foreach (string d in Directory.GetDirectories(Cfg.SaveDir, ".recv-*")) // leftovers of interrupted transfers
             if (Util.IsId(Path.GetFileName(d).Substring(6))) try { Directory.Delete(d, true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
 
-        tcp = new TcpListener(bind, Cfg.Port);
-        tcp.ExclusiveAddressUse = true;
-        tcp.Start();
-        udp = new UdpClient(new IPEndPoint(bind, Cfg.Port));
+        for (int i = 0; ; i++) {
+            try {
+                tcp = new TcpListener(bind, Cfg.Port);
+                Channel.Keep(tcp.Server);
+                tcp.ExclusiveAddressUse = true;
+                tcp.Start();
+                udp = new UdpClient(new IPEndPoint(bind, Cfg.Port));
+                Channel.Keep(udp.Client);
+                break;
+            } catch (SocketException) { tcp.Stop(); if (i >= 20) throw; Thread.Sleep(500); } // right after an update the old one may still be going
+        }
         udp.EnableBroadcast = true;
         udp.Client.IOControl(-1744830452, new byte[] { 0, 0, 0, 0 }, null); // SIO_UDP_CONNRESET off: ICMP unreachable must not break Receive
         Run(AcceptLoop); Run(UdpLoop); Run(HelloLoop); Run(PumpLoop);
@@ -293,6 +345,7 @@ public partial class Node : IDisposable {
         if (stopping) return;
         if (udp != null) Hello(true);
         stopping = true;
+        CloseShells(delegate { return true; });
         pumpSignal.Set();
         if (tcp != null) tcp.Stop();
         if (udp != null) udp.Close();
@@ -303,6 +356,9 @@ public partial class Node : IDisposable {
         while (!stopping) {
             Hello(false);
             CheckPresence();
+            ExpireGrants();
+            IdleShells();
+            CloseIdleInput();
             Thread.Sleep(3000);
         }
     }
@@ -311,7 +367,7 @@ public partial class Node : IDisposable {
         List<IPEndPoint> to = new List<IPEndPoint>();
         lock (L) {
             key = discKey;
-            body = Encoding.UTF8.GetBytes(Util.ToJson(new { id = Cfg.Id, name = Cfg.Name, port = Cfg.Port, bye = bye }));
+            body = Encoding.UTF8.GetBytes(Util.ToJson(new { id = Cfg.Id, name = Cfg.Name, port = Cfg.Port, device = Device, ver = Version, build = Build, bye = bye }));
             foreach (Peer p in Cfg.Peers) { IPAddress a; if (IPAddress.TryParse(p.Ip, out a)) to.Add(new IPEndPoint(a, p.Port)); }
             foreach (string m in Cfg.Manual) { IPEndPoint e = ParseEndpoint(m); if (e != null) to.Add(e); }
         }
@@ -354,13 +410,13 @@ public partial class Node : IDisposable {
                 lock (L) key = discKey;
                 if (!Crypto.Same(mac, Crypto.Hmac(key, body))) continue;
                 Dictionary<string, object> j = Util.FromJson<Dictionary<string, object>>(Encoding.UTF8.GetString(body));
-                Seen(Util.Str(j, "id"), Util.Str(j, "name"), from.Address.ToString(), (int)Util.Num(j, "port"), Util.Flag(j, "bye"));
+                Seen(Util.Str(j, "id"), Util.Str(j, "name"), from.Address.ToString(), (int)Util.Num(j, "port"), LanTalk.Device.Clean(Util.Str(j, "device")), Util.Str(j, "ver"), Util.Str(j, "build"), Util.Flag(j, "bye"));
             } catch (ObjectDisposedException) { return; }
             catch (SocketException) { if (stopping) return; Thread.Sleep(100); }
             catch (Exception) { } // malformed packet
         }
     }
-    void Seen(string id, string name, string ip, int port, bool bye) {
+    void Seen(string id, string name, string ip, int port, string device, string ver, string build, bool bye) { // device, ver, build: null when it isn't an announcement
         if (!Util.IsId(id) || id == Cfg.Id || port < 1 || port > 65535) return;
         name = Util.Cut(name.Trim(), 40);
         if (name.Length == 0) name = ip;
@@ -369,6 +425,8 @@ public partial class Node : IDisposable {
             Peer p = Cfg.Peers.Find(delegate (Peer x) { return x.Id == id; });
             if (p == null) { if (bye) return; p = new Peer(); p.Id = id; Cfg.Peers.Add(p); save = true; }
             if (p.Name != name || p.Ip != ip || p.Port != port) { p.Name = name; p.Ip = ip; p.Port = port; save = true; }
+            if (device != null && p.Device != device) { p.Device = device; save = true; } // only the announcement says it
+            if (ver != null && !bye) { if (!Regex.IsMatch(ver + build, "\\A[0-9a-f.]{0,30}\\z")) ver = build = ""; p.Ver = ver; p.Build = build; }
             cameOnline = !bye && !p.Online;
             p.LastSeen = bye ? DateTime.MinValue : DateTime.UtcNow;
             if (cameOnline) p.RetryAfter = DateTime.MinValue;
@@ -380,7 +438,7 @@ public partial class Node : IDisposable {
     void CheckPresence() {
         string s;
         lock (L) {
-            s = string.Join("|", Cfg.Peers.Select(delegate (Peer p) { return p.Id + p.Name + p.Online; }).ToArray());
+            s = string.Join("|", Cfg.Peers.Select(delegate (Peer p) { return p.Id + p.Name + p.Device + p.Online; }).ToArray());
             if (s == lastPresence) return;
             lastPresence = s;
         }
@@ -656,7 +714,7 @@ public partial class Node : IDisposable {
         string from = Util.Str(h, "from"), id = Util.Str(h, "id"), type = Util.Str(h, "t");
         if (Util.Str(h, "to") != Cfg.Id) { Reply(ch, false, Lang.M("这条消息不是发给本机的", "this message is for another PC")); return; }
         if (!Util.IsId(from) || from == Cfg.Id || !Util.IsId(id)) return;
-        Seen(from, Util.Str(h, "name"), ch.RemoteIp, (int)Util.Num(h, "port"), false);
+        Seen(from, Util.Str(h, "name"), ch.RemoteIp, (int)Util.Num(h, "port"), null, null, null, false);
 
         if (type == "key") { ch.SendJson(new { ok = true, key = PublicKey }); return; }
         if (type == "control") { ServeControl(ch, from); return; }

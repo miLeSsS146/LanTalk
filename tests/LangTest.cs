@@ -27,7 +27,7 @@ static partial class Test {
         try {
             o = LtErr(da, out rc, "list", null); Check(rc == 0 && o.Contains("This PC: PC-A") && o.Contains("[online]  PC-B") && !Chinese(o.Replace(A.Cfg.SaveDir, "")), "lang: lt list in English");
             o = LtErr(da, out rc, "", null); Check(rc == 1, "lang: usage");
-            o = LtErr(da, out rc, "help", null); Check(o.Contains("lt run --to PC") && !Chinese(o), "lang: usage in English");
+            o = LtErr(da, out rc, "help", null); Check(o.Contains("lt run --bg [--cwd FOLDER]") && !Chinese(o), "lang: usage in English");
             o = LtErr(da, out rc, "run --to PC-B 1", null); Check(rc == 125 && Err.StartsWith("Error: ") && Err.Contains("Control access") && !Chinese(Err), "lang: refusal in English");
             o = LtErr(da, out rc, "send --to nobody hi", null); Check(rc == 1 && o.Contains("no PC called \"nobody\"") && !Chinese(o), "lang: error in English");
             B.SetGrant(ia, "PC-A", A.PublicKey, "allow");

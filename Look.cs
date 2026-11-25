@@ -1,9 +1,12 @@
 // LanTalk's look: warm paper colours, one clay accent, serif headings, and the few self-drawn controls that need it.
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Text.RegularExpressions;
 using System.Windows.Forms;
 
 namespace LanTalk {
@@ -15,12 +18,16 @@ public static class Theme {
     public static readonly Color Clay = C(0xD97757), Accent = C(0xC6613F), AccentDown = C(0xAD5233), AccentText = C(0xA04426);
     public static readonly Color Mine = C(0xECE8DC), Theirs = Color.White, AgentFill = C(0xFAEEE2), AgentLine = C(0xECD3BC);
     public static readonly Color Sand = C(0xD8D2C0), Olive = C(0x6F8753), Online = C(0x55703C), Bad = C(0xB53333);
+    public static readonly Color AskFill = C(0xF6DFCB), AskLine = C(0xE3BE9F), AddFill = C(0xE0E7D4), AddText = C(0x3F5529), DelFill = C(0xF5DEDA), DelText = C(0x8E2A2A);
     public static float Scale = 1f;
     public static int S(int v) { return (int)Math.Round(v * Scale); }
     public static readonly Font Body = new Font("Microsoft YaHei UI", 10f), Small = new Font("Microsoft YaHei UI", 8.5f), Bold = new Font("Microsoft YaHei UI", 10f, FontStyle.Bold);
-    public static readonly Font Brand = Serif(15f), Heading = Serif(14f), Greeting = Serif(19f);
+    public static readonly Font Heading = Serif(14f), Greeting = Serif(19f);
     public static readonly Font Glyph = Pick(11f, "Segoe Fluent Icons", "Segoe MDL2 Assets"), GlyphBig = Pick(15f, "Segoe Fluent Icons", "Segoe MDL2 Assets");
     public static readonly Font Mono = Pick(9.5f, "Cascadia Mono", "Consolas");
+    static readonly Font wide = new Font("Microsoft YaHei UI", 9.5f);
+    // The code font has no Chinese, and GDI draws boxes instead of borrowing from another font.
+    public static Font MonoFor(string s) { foreach (char c in s ?? "") if (c > 0x24FF || c == 0x2212) return wide; return Mono; }
     static Font Serif(float pt) { return Pick(pt, "Source Han Serif CN", "Noto Serif SC", "Microsoft YaHei UI"); }
     static Font Pick(float pt, params string[] names) {
         foreach (string n in names) { Font f = new Font(n, pt); if (f.OriginalFontName == f.Name) return f; f.Dispose(); } // a missing family silently becomes another one
@@ -43,11 +50,51 @@ public static class Theme {
         using (Stream s = typeof(Theme).Assembly.GetManifestResourceStream("LanTalk.ico"))
             return s == null ? SystemIcons.Application : new Icon(s, size);
     }
-    static Bitmap mark;
-    public static void DrawMark(Graphics g, Rectangle r) {
-        if (mark == null || mark.Width < r.Width) using (Icon i = AppIcon(new Size(r.Width, r.Width))) mark = i.ToBitmap();
-        InterpolationMode old = g.InterpolationMode; g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-        g.DrawImage(mark, r); g.InterpolationMode = old;
+    // The tray icon with a red dot while another PC is at work here.
+    static Icon busy;
+    public static Icon BusyIcon() {
+        if (busy != null) return busy;
+        Size z = SystemInformation.SmallIconSize;
+        using (Icon i = AppIcon(z)) using (Bitmap b = new Bitmap(z.Width, z.Height)) {
+            using (Graphics g = Graphics.FromImage(b)) {
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+                g.DrawIcon(i, new Rectangle(Point.Empty, z));
+                float d = z.Width * .56f;
+                g.FillEllipse(Brushes.White, z.Width - d, z.Height - d, d, d);
+                using (Brush r = new SolidBrush(Bad)) g.FillEllipse(r, z.Width - d + d * .13f, z.Height - d + d * .13f, d * .74f, d * .74f);
+            }
+            return busy = Icon.FromHandle(b.GetHicon());
+        }
+    }
+    // Device icons: one-colour outlines on a 24 x 24 grid, embedded by build.cmd, drawn by icon\make-devices.py.
+    static readonly Dictionary<string, GraphicsPath> devices = new Dictionary<string, GraphicsPath>();
+    public static GraphicsPath DevicePath(string kind) {
+        GraphicsPath p;
+        if (devices.TryGetValue(kind, out p)) return p;
+        p = new GraphicsPath(FillMode.Alternate);
+        using (Stream s = typeof(Theme).Assembly.GetManifestResourceStream(kind + ".svg"))
+            if (s != null) using (StreamReader r = new StreamReader(s))
+                foreach (Match shape in Regex.Matches(r.ReadToEnd(), "M([\\d. L-]+)Z")) {
+                    List<PointF> pts = new List<PointF>();
+                    foreach (string xy in shape.Groups[1].Value.Split('L')) { string[] v = xy.Split(' '); pts.Add(new PointF(float.Parse(v[0], CultureInfo.InvariantCulture), float.Parse(v[1], CultureInfo.InvariantCulture))); }
+                    p.AddPolygon(pts.ToArray());
+                }
+        return devices[kind] = p;
+    }
+    // The sign of the Claude channel: a command prompt.
+    public static void DrawPrompt(Graphics g, Rectangle r, Color c) {
+        using (Pen p = new Pen(c, r.Width * .058f)) {
+            p.StartCap = p.EndCap = LineCap.Round; p.LineJoin = LineJoin.Round;
+            g.DrawLines(p, new PointF[] { new PointF(r.X + r.Width * .29f, r.Y + r.Height * .34f), new PointF(r.X + r.Width * .45f, r.Y + r.Height * .50f), new PointF(r.X + r.Width * .29f, r.Y + r.Height * .66f) });
+            g.DrawLine(p, r.X + r.Width * .53f, r.Y + r.Height * .67f, r.X + r.Width * .72f, r.Y + r.Height * .67f);
+        }
+    }
+    public static void DrawDevice(Graphics g, string kind, RectangleF r, Color c) {
+        GraphicsState old = g.Save();
+        g.SmoothingMode = SmoothingMode.AntiAlias; g.PixelOffsetMode = PixelOffsetMode.Half;
+        g.TranslateTransform(r.X, r.Y); g.ScaleTransform(r.Width / 24, r.Height / 24);
+        using (Brush b = new SolidBrush(c)) g.FillPath(b, DevicePath(kind));
+        g.Restore(old);
     }
 
     public static GraphicsPath Round(Rectangle r, int d) {
@@ -124,6 +171,29 @@ public class RButton : Button {
     }
 }
 
+// One kind of PC to choose from: icon and name.
+public class DeviceChoice : RadioButton {
+    readonly string kind;
+    bool hot;
+    public DeviceChoice(string text, string deviceKind) {
+        Text = text; kind = deviceKind; Font = Theme.Small; Cursor = Cursors.Hand;
+        SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+    }
+    protected override void OnCheckedChanged(EventArgs e) { base.OnCheckedChanged(e); Invalidate(); }
+    protected override void OnMouseEnter(EventArgs e) { hot = true; Invalidate(); base.OnMouseEnter(e); }
+    protected override void OnMouseLeave(EventArgs e) { hot = false; Invalidate(); base.OnMouseLeave(e); }
+    protected override void OnPaint(PaintEventArgs e) {
+        Graphics g = e.Graphics; g.Clear(Parent == null ? Theme.Back : Parent.BackColor); g.SmoothingMode = SmoothingMode.AntiAlias;
+        Rectangle r = new Rectangle(0, 0, Width - 1, Height - 1);
+        Theme.Fill(g, r, Theme.S(18), Checked ? Theme.AgentFill : hot ? Theme.Side : Theme.Card, Checked || Focused && ShowFocusCues ? Theme.Accent : Theme.Line);
+        if (Focused && ShowFocusCues) Theme.Fill(g, Rectangle.Inflate(r, -2, -2), Theme.S(15), Color.Empty, Theme.Accent);
+        TextFormatFlags f = TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding | TextFormatFlags.SingleLine;
+        int d = Theme.S(24), gap = Theme.S(7), w = Theme.Measure(Text, Font, new Size(int.MaxValue, int.MaxValue), f).Width, x = (Width - d - gap - w) / 2;
+        Theme.DrawDevice(g, kind, new RectangleF(x, (Height - d) / 2, d, d), Checked ? Theme.AccentText : Theme.Soft);
+        TextRenderer.DrawText(g, Text, Font, new Rectangle(x + d + gap, 0, w + 2, Height), Checked ? Theme.AccentText : Theme.Text, f);
+    }
+}
+
 // White rounded box around an input.
 public class CardPanel : Panel {
     public int Corner = 12;
@@ -135,6 +205,7 @@ public class CardPanel : Panel {
         e.Graphics.Clear(Parent == null ? Theme.Back : Parent.BackColor);
         e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
         Theme.Fill(e.Graphics, new Rectangle(0, 0, Width - 1, Height - 1), Theme.S(2 * Corner), BackColor, active ? Theme.LineFocus : Theme.Line);
+        base.OnPaint(e); // the Paint event
     }
 }
 
@@ -219,13 +290,26 @@ public class HeaderBar : Control {
     }
 }
 
-// App name at the top of the side bar.
+// Top of the side bar: the app name and which PC this is. Deliberately no logo and no avatar, so it doesn't look like a conversation.
 public class BrandBar : Control {
+    public string Pc = "";
     public BrandBar() { SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true); SetStyle(ControlStyles.Selectable, false); BackColor = Theme.Side; }
     protected override void OnPaint(PaintEventArgs e) {
-        int d = Theme.S(32);
-        Theme.DrawMark(e.Graphics, new Rectangle(Theme.S(20), (Height - d) / 2, d, d));
-        TextRenderer.DrawText(e.Graphics, "LanTalk", Theme.Brand, new Rectangle(Theme.S(20) + d + Theme.S(10), 0, Width, Height), Theme.Text, TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding | TextFormatFlags.SingleLine);
+        Graphics g = e.Graphics; g.Clear(BackColor);
+        TextFormatFlags f = TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis;
+        int x = Theme.S(20), w = Width - x - Theme.S(12);
+        TextRenderer.DrawText(g, "LanTalk", Theme.Heading, new Rectangle(x, Theme.S(9), w, Theme.S(30)), Theme.Text, f);
+        TextRenderer.DrawText(g, Lang.T("本机：{0}", "This PC: {0}", Pc), Theme.Small, new Rectangle(x + Theme.S(1), Theme.S(39), w, Theme.S(20)), Theme.Dim, f);
+        using (Pen p = new Pen(Theme.Line)) g.DrawLine(p, 0, Height - 1, Width, Height - 1); // meets the line under the title on the right
+    }
+}
+
+// Conversation list. A caption belongs to the row below it but can't be clicked.
+public class ConvList : ListBox {
+    public Func<Point, bool> Dead;
+    protected override void WndProc(ref Message m) {
+        if ((m.Msg == 0x201 || m.Msg == 0x203 || m.Msg == 0x204) && Dead != null && Dead(new Point((short)(m.LParam.ToInt64() & 0xFFFF), (short)((m.LParam.ToInt64() >> 16) & 0xFFFF)))) return; // button down, double click, right button down
+        base.WndProc(ref m);
     }
 }
 

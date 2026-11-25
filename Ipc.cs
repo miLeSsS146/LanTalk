@@ -17,6 +17,7 @@ public static class Ipc {
     static bool HasD { get { DriveInfo d = new DriveInfo("D"); return d.DriveType == DriveType.Fixed && d.IsReady; } }
     public static string DefaultData { get { return HasD ? "D:\\LanTalk\\Data" : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "LanTalk"); } }
     public static string DefaultSave { get { return HasD ? "D:\\LanTalk\\Files" : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads\\LanTalk"); } }
+    public static readonly string[] Remote = { "run", "bg", "put", "get", "jobs", "log", "stop", "shot", "windows", "cat", "edit", "push", "pull", "info", "shell", "sessions", "end", "tunnel", "claude", "update", "input" }; // requests that go to another PC
     public static string PipeName(string dataDir) {
         byte[] key = Encoding.UTF8.GetBytes(WindowsIdentity.GetCurrent().User.Value);
         byte[] h = Crypto.Hmac(key, Encoding.UTF8.GetBytes(Path.GetFullPath(dataDir).TrimEnd('\\').ToUpperInvariant()));
@@ -69,11 +70,11 @@ public class IpcServer {
         try {
             Dictionary<string, object> q = Util.FromJson<Dictionary<string, object>>(Ipc.ReadAll(p));
             string cmd = Util.Str(q, "cmd");
-            if (cmd == "run" || cmd == "put" || cmd == "get") {
+            if (Array.IndexOf(Ipc.Remote, cmd) >= 0) {
                 string to = Target(Util.Str(q, "to"));
                 if (Node.IsGroup(to)) throw Lang.Err("要用 --to 指明一台电脑", "name one PC with --to");
                 Dictionary<string, object> req = new Dictionary<string, object>(); req["op"] = cmd;
-                foreach (string k in new string[] { "cmd", "cwd", "path", "timeout", "force" }) if (q.ContainsKey("r_" + k)) req[k] = q["r_" + k];
+                foreach (string k in q.Keys) if (k.StartsWith("r_")) req[k.Substring(2)] = q[k];
                 node.Control(to, req, Agent(q), Util.Str(q, "local"), delegate (object o) { Ipc.WriteAll(p, Util.ToJson(o)); });
                 p.WaitForPipeDrain();
                 return;
@@ -88,8 +89,9 @@ public class IpcServer {
     object Handle(Dictionary<string, object> q) {
         switch (Util.Str(q, "cmd")) {
             case "list":
-                return new { ok = true, me = node.Cfg.Name, id = node.Cfg.Id, saveDir = node.Cfg.SaveDir,
-                    peers = node.Peers().Select(delegate (Peer p) { return new { name = p.Name, id = p.Id, ip = p.Ip, online = p.Online }; }).ToArray() };
+                return new { ok = true, me = node.Cfg.Name, id = node.Cfg.Id, ver = Node.Version, build = Node.Build, saveDir = node.Cfg.SaveDir,
+                    peers = node.Peers().Select(delegate (Peer p) { return new { name = p.Name, id = p.Id, ip = p.Ip, online = p.Online, ver = p.Ver ?? "", build = p.Build ?? "" }; }).ToArray() };
+            case "selfupdate": node.UpdateSelf(Util.Str(q, "path"), Util.Flag(q, "force")); return new { ok = true };
             case "send": return Result(node.SendText(Target(Util.Str(q, "to")), Util.Str(q, "text"), Agent(q)));
             case "file": return Result(node.SendPath(Target(Util.Str(q, "to")), Util.Str(q, "path"), Agent(q)));
             case "status":

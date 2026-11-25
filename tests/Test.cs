@@ -150,7 +150,11 @@ static partial class Test {
         o = Lt(Path.Combine(root, "none"), out rc, "list"); Check(rc == 2 && o.Contains("没有运行"), "lt: app not running is an error");
 
         ControlTests(A, B, C, da, db);
+        RemoteTests(A, B, da, db);
+        WorkTests(A, B, da, db);
+        InputTests(A, B, da, db);
         LangTests(A, B, da);
+        DeviceTests(A, B, code);
 
         // offline queue, restart
         B.Dispose();
@@ -165,7 +169,7 @@ static partial class Test {
         Check(A2.History(ib, 100).Count(delegate (ChatMsg x) { return x.State == "queued"; }) == 3, "queue survives a restart");
         B2.Start();
         Check(Until(delegate { return B2.History(ia, 100).Exists(delegate (ChatMsg x) { return x.Text == "离线消息"; }) && A2.History(ib, 100).All(delegate (ChatMsg x) { return x.Pending.Count == 0; }); }, 25), "queued text and file delivered after it comes back");
-        Check(B2.History(ia, 100).Exists(delegate (ChatMsg x) { return x.Text == "编译好了吗？" && x.Agent == "Claude"; }), "history survives a restart");
+        Check(B2.History(ia, 9999).Exists(delegate (ChatMsg x) { return x.Text == "编译好了吗？" && x.Agent == "Claude"; }), "history survives a restart");
         Check(!File.ReadAllText(Path.Combine(da, "config.json")).Contains(code), "pairing code is not stored in plain text");
         A2.Dispose(); B2.Dispose(); C.Dispose(); X.Dispose();
         Console.WriteLine(passed + " passed, " + failed + " failed");
@@ -177,6 +181,7 @@ static partial class Test {
         Program.InitUi();
         string code = Crypto.NewCode();
         Node A = Make("笔记本", 47911, code, 47912, 47913), B = Make("台式机", 47912, code, 47911), C = Make("第三台", 47913, code, 47911);
+        B.Cfg.Device = "tower"; C.Cfg.Device = "mini";
         B.Cfg.Manual.Add("127.0.0.1:47913"); C.Cfg.Manual.Add("127.0.0.1:47912");
         A.Start(); B.Start(); C.Start();
         Until(delegate { return A.Peers().Count == 2 && B.Peers().Count == 2; }, 10);
@@ -196,6 +201,23 @@ static partial class Test {
         Save(form, file);
         using (SettingsForm s = new SettingsForm(A, true)) { s.StartPosition = FormStartPosition.Manual; s.Location = new Point(-5000, -5000); s.ShowInTaskbar = false; s.Show(); Pump(300); Save(s, file.Replace(".png", "-settings.png")); }
         A.Dispose(); B.Dispose();
+    }
+    static void DeviceTests(Node A, Node B, string code) {
+        byte[] smbios = { 0, 3, 0, 0, 0, 0, 0, 0,  0, 5, 0, 0, 1, (byte)'x', 0, 0,  1, 4, 0, 0, 0, 0,  3, 9, 0, 0, 1, 0x8A, 0, 0, 0, 0, 0 };
+        Check(Device.Chassis(smbios) == 10 && Device.Chassis(new byte[0]) == 0 && Device.Chassis(new byte[] { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }) == 0 && Device.Chassis(smbios.Take(26).ToArray()) == 0, "device: chassis read from SMBIOS, damaged tables ignored");
+        Check(Device.FromChassis(10) == "laptop" && Device.FromChassis(31) == "laptop" && Device.FromChassis(35) == "mini" && Device.FromChassis(3) == "tower" && Device.FromChassis(0) == "tower", "device: kinds");
+        Check(Device.Kinds.Contains(Device.Detected) && B.Device == Device.Detected, "device: detected here: " + Device.Detected);
+        Func<string> seen = delegate { return A.Peers().Find(delegate (Peer p) { return p.Id == B.Cfg.Id; }).Device; };
+        Check(Until(delegate { return seen() == Device.Detected; }, 8), "device: the other PC knows it");
+        int changed = 0; Action h = delegate { changed++; }; A.PeersChanged += h;
+        B.Cfg.Device = "mini"; Check(Until(delegate { return seen() == "mini" && changed > 0; }, 8), "device: a new choice arrives and refreshes the list");
+        B.SendText(A.Cfg.Id, "device"); Until(delegate { return Last(A, B.Cfg.Id).Text == "device"; }, 5); Check(seen() == "mini", "device: messages leave it alone");
+        string f = Path.Combine(root, "PC-A", "config.json"); Check(File.ReadAllText(f).Contains("\"Device\":\"mini\""), "device: remembered for when it is offline");
+        B.Cfg.Device = "../x"; Thread.Sleep(3500); Check(seen() == "mini", "device: unknown kinds are ignored");
+        B.Cfg.Device = null; A.PeersChanged -= h;
+        string d = Path.Combine(root, "device-config"); Directory.CreateDirectory(d); File.WriteAllText(Path.Combine(d, "config.json"), "{\"Device\":\"toaster\",\"Peers\":[{\"Id\":\"" + new string('a', 32) + "\",\"Device\":\"fridge\"}]}");
+        Node n = new Node(d, IPAddress.Loopback); Check(n.Cfg.Device == null && n.Peers()[0].Device == null, "device: bad values in the config are dropped");
+        foreach (string k in Device.Kinds) { RectangleF r = Theme.DevicePath(k).PointCount == 0 ? RectangleF.Empty : Theme.DevicePath(k).GetBounds(); Check(r.Width >= 12 && r.Height >= 12 && r.Left >= 0 && r.Top >= 0 && Math.Abs(r.Left + r.Right - 24) < .1 && Math.Abs(r.Top + r.Bottom - 24) < .5, "device: icon " + k + " is centred " + r); }
     }
     static void Pump(int ms) { DateTime end = DateTime.UtcNow.AddMilliseconds(ms); while (DateTime.UtcNow < end) { Application.DoEvents(); Thread.Sleep(20); } }
     static void Save(Form f, string file) { using (Bitmap b = new Bitmap(f.Width, f.Height)) { f.DrawToBitmap(b, new Rectangle(0, 0, f.Width, f.Height)); b.Save(file); } }

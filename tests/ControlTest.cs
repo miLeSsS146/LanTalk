@@ -56,6 +56,7 @@ static partial class Test {
         o = LtErr(da, out rc, "run --to PC-B --cwd \"" + work + "\" -", "'你好 😀 \"引号\" $x'\n(Get-Location).Path\n[Console]::Error.WriteLine('出错了')\ncmd /c 'echo native & exit 7'");
         Check(rc == 7 && o.Contains("你好 😀 \"引号\" $x") && o.Contains(work) && o.Contains("native") && Err.Contains("出错了") && !Err.Contains("CLIXML"), "control: output, errors, folder and exit code come back (" + rc + ")");
         o = LtErr(da, out rc, "run --to PC-B \"Get-Item C:\\nope-nope\"", null); Check(rc == 1 && Err.Contains("nope-nope") && !Err.Contains("CLIXML"), "control: failing cmdlet is readable and exits 1");
+        o = LtErr(da, out rc, "run --to PC-B -", "'中文' )"); Check(rc == 1 && Err.Contains("中文"), "control: a syntax error is readable");
         o = LtErr(da, out rc, "run --to PC-B --json --ascii -", "'中文'"); Check(rc == 0 && o.Contains("\"code\":0") && o.Contains("\\u4e2d") && o.All(delegate (char c) { return c < 128; }), "control: --json --ascii");
         ChatMsg ma = A.History(ib, 1)[0], mb = B.History(ia, 1)[0];
         Check(ma.Kind == "run" && mb.Kind == "run" && mb.Text == "'中文'" && mb.Error.StartsWith("退出码 0") && mb.Agent == "Claude", "control: recorded in the chat of both PCs");

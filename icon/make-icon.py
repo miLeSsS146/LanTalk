@@ -75,9 +75,8 @@ def dib(im):
             if a[x, y] == 0: m[y * row + x // 8] |= 0x80 >> x % 8
     return struct.pack('<IiiHHIIiiII', 40, w, h * 2, 1, 32, 0, len(px) + len(m), 0, 0, 0, 0) + px + bytes(m)
 
-def main():
-    sizes = [16, 20, 24, 32, 40, 48, 64, 96, 128, 256]
-    ims = {z: render(z) for z in sizes}
+def write_ico(path, ims):
+    sizes = sorted(ims)
     blobs = []
     for z in sizes:
         if z >= 64:
@@ -87,7 +86,12 @@ def main():
     out = struct.pack('<HHH', 0, 1, len(sizes))
     for z, b in zip(sizes, blobs):
         out += struct.pack('<BBBBHHII', z % 256, z % 256, 0, 0, 1, 32, len(b), off); off += len(b)
-    with open(os.path.join(HERE, '..', 'LanTalk.ico'), 'wb') as f: f.write(out + b''.join(blobs))
+    with open(path, 'wb') as f: f.write(out + b''.join(blobs))
+
+def main():
+    sizes = [16, 20, 24, 32, 40, 48, 64, 96, 128, 256]
+    ims = {z: render(z) for z in sizes}
+    write_ico(os.path.join(HERE, '..', 'LanTalk.ico'), ims)
     render(512).save(os.path.join(HERE, 'LanTalk-512.png'))
     svg = ['<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">']
     for pts, col in shapes(256)[1]:
@@ -107,4 +111,4 @@ def main():
             pv.paste(e, (x, j * 380 + 235), e); x += 145
     pv.save(os.path.join(HERE, 'preview.png'))
 
-main()
+if __name__ == '__main__': main()
